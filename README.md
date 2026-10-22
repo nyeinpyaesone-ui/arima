@@ -51,11 +51,14 @@ When authentication is unconfigured outside production, `GET /api/v1/me` fails c
 
 Implemented: health probes, validated HTTP runtime settings, OIDC JWT verification, bearer middleware, a protected identity endpoint, and a production startup gate requiring OIDC configuration. Health readiness is process-level only; it does not check external dependencies.
 
-Not implemented yet: PostgreSQL persistence, tenant-isolation enforcement for stored records, role/policy authorization, business resource/action routes, persistent audit logging, idempotency storage, and transactional outbox. OpenAPI contracts for planned endpoints do not mean those routes are live. Do not expose this scaffold as production ERP functionality.
+Implemented foundation: versioned PostgreSQL migration for tenant-scoped records, forced row-level security (RLS), audit events, idempotency keys and outbox events; a tenant-scoped transaction repository; optimistic record version checks; and PostgreSQL-backed integration tests in CI. The application does not run migrations automatically.
+
+Still not implemented: business resource/action routes, role/policy authorization, an outbox publisher/worker, operational retention/replay policies, and end-to-end business workflows that use the repository transaction to atomically persist a mutation, audit event, idempotency response and outbox event. OpenAPI contracts for planned endpoints do not mean those routes are live. Do not expose this scaffold as production ERP functionality.
 
 ## Layout
 - `cmd/erp-api`: executable entry point.
 - `internal/auth`: bearer middleware and OIDC JWT verification.
+- `internal/store`: PostgreSQL connection and tenant-scoped transaction repository.
 - `internal/config`: validated runtime configuration.
 - `internal/transport/httpapi`: health and protected identity endpoints.
 - `api/openapi`: REST contract.

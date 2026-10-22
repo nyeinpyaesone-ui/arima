@@ -38,6 +38,13 @@ jobs:
           cache: true
       - name: Resolve and validate module graph
         run: go mod tidy
+      - name: Temporary module checksum artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-sum-bootstrap
+          path: go.sum
+          if-no-files-found: error
+          retention-days: 1
       - name: Format
         shell: bash
         run: |
@@ -52,10 +59,3 @@ jobs:
         run: go test -race -coverprofile=coverage.out ./...
       - name: Build
         run: CGO_ENABLED=0 go build -trimpath ./cmd/erp-api
-      - name: Temporary module checksum artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-sum-bootstrap
-          path: go.sum
-          if-no-files-found: error
-          retention-days: 1

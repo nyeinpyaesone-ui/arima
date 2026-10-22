@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -34,13 +35,13 @@ type IntrospectionVerifier struct {
 }
 
 type introspectionResponse struct {
-	Active   bool            `json:"active"`
-	Issuer   string          `json:"iss"`
-	Audience json.RawMessage `json:"aud"`
-	Subject  string          `json:"sub"`
-	TenantID string          `json:"tenant_id"`
-	Expires  json.Number     `json:"exp"`
-	NotBefore json.Number    `json:"nbf"`
+	Active    bool            `json:"active"`
+	Issuer    string          `json:"iss"`
+	Audience  json.RawMessage `json:"aud"`
+	Subject   string          `json:"sub"`
+	TenantID  string          `json:"tenant_id"`
+	Expires   json.Number     `json:"exp"`
+	NotBefore json.Number     `json:"nbf"`
 }
 
 func NewIntrospectionVerifier(cfg IntrospectionConfig) (*IntrospectionVerifier, error) {
@@ -55,7 +56,6 @@ func NewIntrospectionVerifier(cfg IntrospectionConfig) (*IntrospectionVerifier, 
 		return nil, fmt.Errorf("introspection endpoint must be an absolute HTTPS URL without userinfo or fragment")
 	}
 	if net.ParseIP(u.Hostname()) != nil {
-		// IP endpoints can bypass hostname-based TLS identity assumptions and are disallowed by default.
 		return nil, fmt.Errorf("introspection endpoint must use a DNS hostname")
 	}
 	return &IntrospectionVerifier{
@@ -99,6 +99,8 @@ func NewIntrospectionVerifierFromEnv(getenv func(string) string) (TokenVerifier,
 	return verifier, nil
 }
 
+// Verify delegates token validation to the configured authorization server over TLS,
+// then independently checks issuer, audience, time, subject, and tenant claims.
 func (v *IntrospectionVerifier) Verify(ctx context.Context, token string) (Principal, error) {
 	if v == nil {
 		return Principal{}, ErrVerifierNotConfigured
@@ -121,7 +123,7 @@ func (v *IntrospectionVerifier) Verify(ctx context.Context, token string) (Princ
 		return Principal{}, ErrInvalidToken
 	}
 	var data introspectionResponse
-	decoder := json.NewDecoder(http.MaxBytesReader(nil, resp.Body, 1<<20))
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
 	decoder.UseNumber()
 	if err := decoder.Decode(&data); err != nil || !data.Active {
 		return Principal{}, ErrInvalidToken

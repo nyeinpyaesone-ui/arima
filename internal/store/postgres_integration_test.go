@@ -15,11 +15,12 @@ import (
 
 func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("ARIMA_TEST_DATABASE_URL"))
-	if dsn == "" {
-		t.Skip("ARIMA_TEST_DATABASE_URL is not configured")
+	runtimeDSN := strings.TrimSpace(os.Getenv("ARIMA_TEST_RUNTIME_DATABASE_URL"))
+	if dsn == "" || runtimeDSN == "" {
+		t.Skip("ARIMA_TEST_DATABASE_URL and ARIMA_TEST_RUNTIME_DATABASE_URL are required")
 	}
-	if !strings.Contains(dsn, "/arima_test") {
-		t.Fatal("refusing to run destructive migration integration test unless database name includes arima_test")
+	if !strings.Contains(dsn, "/arima_test") || !strings.Contains(runtimeDSN, "/arima_test") {
+		t.Fatal("refusing to run migration integration test unless both database names include arima_test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -39,6 +40,27 @@ func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
 		t.Fatalf("apply tenant migration to isolated test database: %v", err)
 	}
+	_, err = db.ExecContext(ctx, `
+DO $
+BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arima_runtime') THEN
+		CREATE ROLE arima_runtime LOGIN PASSWORD 'arima_test_password' NOSUPERUSER NOBYPASSRLS;
+	END IF;
+END $;
+GRANT CONNECT ON DATABASE arima_test TO arima_runtime;
+GRANT USAGE ON SCHEMA public TO arima_runtime;
+GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, outbox_events TO arima_runtime;`)
+	if err != nil {
+		t.Fatalf("create restricted runtime test role: %v", err)
+	}
+	runtimeDB, err := sql.Open("pgx", runtimeDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtimeDB.Close()
+	if err := runtimeDB.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	const tenantA = "11111111-1111-4111-8111-111111111111"
 	const tenantB = "22222222-2222-4222-8222-222222222222"
@@ -47,7 +69,7 @@ func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	repo, err := NewPostgres(db)
+	repo, err := NewPostgres(runtimeDB)
 	if err != nil {
 		t.Fatal(err)
 	}

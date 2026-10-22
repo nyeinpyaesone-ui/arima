@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build-and-deploy-staging:
-    name: Build immutable image and request staging rollout
+    name: Build image and request digest-pinned staging rollout
     if: github.ref == 'refs/heads/main' && inputs.acknowledge == 'I confirm staging deployment'
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -73,7 +73,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish immutable image
+      - name: Build and publish image; deployment pins its digest
         id: image
         uses: docker/build-push-action@v6
         with:

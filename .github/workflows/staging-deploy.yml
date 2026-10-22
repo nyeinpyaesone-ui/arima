@@ -1,0 +1,110 @@
+name: Staging Container Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arima-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy-staging:
+    name: Build immutable image and request staging rollout
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout reviewed main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish immutable staging image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+
+      - name: Validate staging deployment integration
+        env:
+          STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+          STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_DEPLOY_HOOK_URL" || {
+            echo "::error::Configure staging environment secret STAGING_DEPLOY_HOOK_URL for the selected container platform's approved deployment adapter."
+            exit 1
+          }
+          test -n "$STAGING_HEALTHCHECK_URL" || {
+            echo "::error::Configure staging environment variable STAGING_HEALTHCHECK_URL, e.g. the HTTPS /health/ready URL."
+            exit 1
+          }
+          case "$STAGING_DEPLOY_HOOK_URL" in https://*) ;; *) echo "::error::Deployment hook must use HTTPS."; exit 1;; esac
+          case "$STAGING_HEALTHCHECK_URL" in https://*) ;; *) echo "::error::Health-check URL must use HTTPS."; exit 1;; esac
+
+      - name: Request staging rollout of exact image
+        env:
+          STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+          IMAGE_REF: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{image:$image,digest:$digest,commit:$commit,environment:"staging"}')"
+          # The configured adapter must accept this JSON contract and deploy the exact digest.
+          response="$(curl --fail --silent --show-error --max-time 30 \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            "$STAGING_DEPLOY_HOOK_URL")"
+          echo "Staging deployment adapter accepted the rollout request."
+          # Do not print response bodies; provider responses may contain operational details.
+          test -n "$response"
+
+      - name: Verify staging readiness
+        env:
+          STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 5 "$STAGING_HEALTHCHECK_URL" -o /tmp/health.json; then
+              if jq -e '.status == "ready"' /tmp/health.json >/dev/null; then
+                echo "Staging readiness endpoint reports ready."
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "::error::Staging did not report ready within 5 minutes. Inspect platform logs and roll back through the platform's documented controls."
+          exit 1
+
+      - name: Deployment boundary
+        if: always()
+        run: echo "This workflow targets staging only. Production deployment is not implemented or triggered.";

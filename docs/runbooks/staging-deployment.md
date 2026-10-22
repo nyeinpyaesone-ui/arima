@@ -1,52 +1,64 @@
 # ARIMA staging deployment runbook
 
-## Scope and maturity
+## Scope
 
-This deployment path is **staging only** and deploys the current main-branch Go HTTP scaffold. The current service implements root and process-level health endpoints; it does not yet implement the business API, database-backed readiness, production OIDC enforcement, or ERP workflows. A successful deployment proves packaging and transport, not production readiness.
+This runbook describes a **managed-container-platform adapter** for staging. The repository does not yet identify a specific provider, so the workflow deliberately calls a provider adapter rather than pretending that a generic platform deploy hook is universally compatible.
 
-## Pipeline
-
-1. CI checks Go formatting, vet, tests and build.
-2. Container Image builds on pull requests without publishing. A push to `main` publishes an immutable commit-tagged image to GHCR.
-3. Deploy ARIMA Staging is manually dispatched from `main`, requires an explicit acknowledgement and the protected `staging` GitHub Environment.
-4. The job validates required secrets, uses pinned host keys (no `ssh-keyscan` trust-on-first-use), authenticates to GHCR, transfers Compose configuration, deploys the commit-specific image, and checks `GET /health/ready`.
-5. The service binds only to host loopback on port 8080. An administrator must configure a separately managed TLS reverse proxy and DNS before public access.
+The workflow is manually dispatched from `main`, requires explicit acknowledgement, uses the protected GitHub Environment `staging`, builds an immutable commit-tagged multi-architecture GHCR image, requests a rollout using the image digest, and polls the configured HTTPS health endpoint. It does not deploy production or run migrations.
 
 ## Required GitHub Environment
 
-Create a GitHub Environment named `staging`. Add the following environment-scoped secrets only after provisioning a dedicated staging host:
+Create an environment named `staging` and configure:
 
-- `STAGING_HOST`: DNS name or IP of the approved staging server.
-- `STAGING_USER`: dedicated, non-root deployment account with access to Docker/Compose.
-- `STAGING_SSH_PRIVATE_KEY`: private key for that deployment account.
-- `STAGING_KNOWN_HOSTS`: host key line obtained and verified out-of-band from the server administrator.
-- `GHCR_USERNAME`: account allowed to read the package.
-- `GHCR_READ_TOKEN`: narrowly scoped read-only package token.
+- Secret `STAGING_DEPLOY_HOOK_URL`: HTTPS URL for a reviewed adapter implementing the contract below.
+- Variable `STAGING_HEALTHCHECK_URL`: HTTPS URL for the deployed service's `/health/ready` endpoint.
 
-Require a reviewer for the `staging` Environment if review is part of the repository's operating model. Restrict SSH access to the GitHub runner network only where practical; hosted runner egress IPs can change, so use a controlled self-hosted runner or a secure overlay if stable allowlisting is required. Never commit secret values.
+Add required reviewers to the environment if supported by the repository's operating model. Do not store provider credentials, database DSNs, or deploy tokens in repository files or workflow variables. The adapter must keep provider credentials server-side.
 
-## Host prerequisites
+## Adapter contract — mandatory before dispatch
 
-- Supported Linux host with Docker Engine and Compose v2 installed and patched.
-- Dedicated deployment account; no SSH root login.
-- Registry egress to `ghcr.io`.
-- Port 8080 reserved for loopback-only application traffic.
-- Independent reverse proxy with TLS and correct forwarded-header policy before external access.
-- Monitoring, host patching, backup policy for any future persistent data, and documented operator access.
+The adapter must:
 
-The current app is stateless and does not require PostgreSQL. Do not attach an unused database merely to make deployment look production-grade. Add PostgreSQL only with an implemented persistence layer, versioned migrations, least-privilege runtime and migration roles, and tested readiness checks.
+1. Authenticate and authorize the caller; HTTPS alone is not authentication.
+2. Allow-list the repository and image namespace `ghcr.io/nyeinpyaesone-ui/arima`.
+3. Accept JSON fields `image`, `digest`, `commit`, and `environment`.
+4. Reject any environment other than `staging` and deploy the exact supplied digest, not a mutable tag.
+5. Return a 2xx response only after the provider accepts the staging rollout request.
+6. Preserve the previous known-good revision and document/rehearse provider-native rollback.
+7. Avoid logging tokens, deploy-hook URLs, database credentials, or sensitive request bodies.
 
-## Rollback
+A vendor-provided one-click deploy hook is **not** assumed to implement this contract. Build and test the adapter for the chosen provider before enabling the workflow. The workflow does not follow HTTP redirects when sending the request.
 
-1. Identify the last known-good image tag `ghcr.io/nyeinpyaesone-ui/arima:sha-<commit>`.
-2. On the staging host, set `ARIMA_IMAGE` to that immutable tag and run `docker compose -f "$HOME/arima-staging/compose.yml" pull` followed by `docker compose -f "$HOME/arima-staging/compose.yml" up -d`.
-3. Verify `curl --fail http://127.0.0.1:8080/health/ready`.
-4. Record the failed commit, timestamps and redacted logs. Do not delete volumes or perform destructive database actions.
+## Service compatibility and limits
 
-## Production blockers
+- Go API entry point: `cmd/erp-api`.
+- Container listens on port `8080`.
+- Existing endpoints: `/health/live` and `/health/ready`.
+- Current readiness is process-level only; HTTP 200 with status `ready` does not establish database connectivity, OIDC readiness, or business correctness.
+- The current `main` service is a scaffold. A successful rollout validates container delivery and process availability, not production ERP readiness.
+- Image publishing on a push to `main` is handled by the separate container-image workflow; the staging workflow builds and publishes the selected commit itself so the rollout is tied to the image digest emitted in that run.
 
-- No production deployment job is provided.
-- No staging host, DNS/TLS endpoint, GHCR package visibility, environment secrets or branch protection was configured by this change.
-- Health readiness currently checks process response only, not dependencies.
-- Business routes, tenant-aware persistence, auth policy, migration runner, observability, SLOs, backup/restore, security scanning and a verified release/provenance chain remain separate gates.
-- Before any production deployment, implement and verify those capabilities, run end-to-end and recovery tests in staging, then create a separately reviewed production workflow with protected approvals and least-privilege identity.
+## PostgreSQL hosted separately from the managed container runtime
+
+The current service scaffold has no active PostgreSQL persistence requirement. Do not inject an unused `ARIMA_DATABASE_URL` or claim database readiness until persistence and migrations are implemented.
+
+When database-backed application code is introduced:
+
+- Store `ARIMA_DATABASE_URL` in the managed platform's secret store, never in this workflow, logs, image labels, or adapter payload.
+- Establish private connectivity from the container runtime to the PostgreSQL host using the provider's private network, VPN, or a narrowly restricted TLS endpoint.
+- Enforce TLS certificate verification, firewall allow-lists, least-privilege runtime and separate migration roles, connection limits, backups, and tested restore procedures.
+- Add database-aware readiness and integration tests using a non-superuser role with `NOSUPERUSER NOBYPASSRLS` where row-level security is required.
+- Run schema migrations as a separately reviewed, controlled operation. This staging deploy workflow intentionally does not run them.
+
+## Rollback and failure handling
+
+The workflow fails if the adapter rejects the request or readiness is not observed within five minutes. It does not automatically roll back through an unknown provider API. The provider adapter/platform must retain the prior known-good revision and expose a documented rollback path. Rehearse rollback before calling staging validated; record the deployed commit, image digest, result, and redacted logs.
+
+## Remaining readiness gates
+
+- Select the managed container provider and implement/review its authenticated adapter.
+- Configure and protect the `staging` environment and verify private GHCR image pull access.
+- Validate container limits, port binding, secrets, TLS, DNS, logs, alerts, and provider rollback.
+- Complete application-level OIDC/authz, tenant isolation, persistence, migrations, outbox, and database-aware readiness as applicable to the product.
+- Pass current-head CI, dependency scanning, container scanning, end-to-end tests, and a documented staging/rollback rehearsal.
+- Keep production deployment out of scope until the readiness evidence is reviewed and a separate protected production workflow is approved.

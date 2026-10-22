@@ -1,3 +1,5 @@
 module github.com/nyeinpyaesone-ui/arima
 
 go 1.23.0
+
+require github.com/coreos/go-oidc/v3 v3.16.0

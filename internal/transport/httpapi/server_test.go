@@ -53,9 +53,9 @@ func TestProtectedIdentityRouteFailsClosedWithoutVerifier(t *testing.T) {
 func TestProtectedIdentityRouteRequiresValidBearer(t *testing.T) {
 	handler := NewWithVerifier(testVerifier{})
 	for _, tc := range []struct {
-		name string
+		name   string
 		header string
-		want int
+		want   int
 	}{
 		{name: "missing token", want: http.StatusUnauthorized},
 		{name: "invalid token", header: "Bearer invalid", want: http.StatusUnauthorized},

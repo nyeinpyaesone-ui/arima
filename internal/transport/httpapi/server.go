@@ -26,9 +26,14 @@ func New() http.Handler {
 // NewWithVerifier registers protected API routes using the supplied trusted verifier.
 // When verifier is nil, protected routes fail closed with 503 while health endpoints remain available.
 func NewWithVerifier(verifier auth.TokenVerifier) http.Handler {
+	return NewWithDependencies(verifier, nil)
+}
+
+// NewWithDependencies injects a dependency readiness check without coupling transport to storage.
+func NewWithDependencies(verifier auth.TokenVerifier, readiness func(context.Context) error) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health("live"))
-	mux.HandleFunc("GET /health/ready", health("ready"))
+	mux.HandleFunc("GET /health/ready", readinessHandler(readiness))
 	mux.Handle("GET /api/v1/me", auth.RequireBearer(verifier, http.HandlerFunc(currentIdentity)))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -52,6 +57,18 @@ func currentIdentity(w http.ResponseWriter, r *http.Request) {
 func health(status string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, healthResponse{Status: status, Service: "arima-erp-api", Timestamp: time.Now().UTC()})
+	}
+}
+
+func readinessHandler(check func(context.Context) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if check != nil {
+			if err := check(r.Context()); err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, healthResponse{Status: "not_ready", Service: "arima-erp-api", Timestamp: time.Now().UTC()})
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, healthResponse{Status: "ready", Service: "arima-erp-api", Timestamp: time.Now().UTC()})
 	}
 }
 

@@ -64,7 +64,12 @@ func NewIntrospectionVerifier(cfg IntrospectionConfig) (*IntrospectionVerifier, 
 		audience: strings.TrimSpace(cfg.Audience),
 		clientID: strings.TrimSpace(cfg.ClientID),
 		secret: cfg.Secret,
-		client: &http.Client{Timeout: 5 * time.Second},
+		client: &http.Client{
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		now: time.Now,
 	}, nil
 }
@@ -122,10 +127,12 @@ func (v *IntrospectionVerifier) Verify(ctx context.Context, token string) (Princ
 	if resp.StatusCode != http.StatusOK {
 		return Principal{}, ErrInvalidToken
 	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if err != nil || len(body) > 1<<20 {
+		return Principal{}, ErrInvalidToken
+	}
 	var data introspectionResponse
-	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
-	decoder.UseNumber()
-	if err := decoder.Decode(&data); err != nil || !data.Active {
+	if err := json.Unmarshal(body, &data); err != nil || !data.Active {
 		return Principal{}, ErrInvalidToken
 	}
 	if data.Issuer != v.issuer || !audienceContains(data.Audience, v.audience) {

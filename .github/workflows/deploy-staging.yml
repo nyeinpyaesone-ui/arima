@@ -78,6 +78,24 @@ jobs:
           scp -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
             deploy/compose.staging.yml "$STAGING_USER@$STAGING_HOST:arima-staging/compose.yml"
+      - name: Record current image for rollback
+        id: previous
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
+            "$STAGING_USER@$STAGING_HOST" 'docker inspect --format "{{.Config.Image}}" arima-api 2>/dev/null || true')"
+          if [[ "$previous" =~ ^ghcr\.io/nyeinpyaesone-ui/arima:sha-[0-9a-f]{40}$ ]]; then
+            echo "image=$previous" >> "$GITHUB_OUTPUT"
+            echo "Previous immutable image recorded for rollback."
+          else
+            echo "image=" >> "$GITHUB_OUTPUT"
+            echo "No recognized previous immutable image; first deployment cannot auto-rollback."
+          fi
       - name: Deploy immutable image to staging
         env:
           STAGING_HOST: ${{ secrets.STAGING_HOST }}
@@ -99,6 +117,18 @@ jobs:
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
             "$STAGING_USER@$STAGING_HOST" \
             'for i in $(seq 1 20); do if curl --fail --silent --show-error http://127.0.0.1:8080/health/ready >/dev/null; then echo "Staging health check passed"; exit 0; fi; sleep 3; done; docker compose -f "$HOME/arima-staging/compose.yml" ps; exit 1'
+      - name: Roll back to previous image if health verification fails
+        if: failure() && steps.previous.outputs.image != ''
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          PREVIOUS_IMAGE: ${{ steps.previous.outputs.image }}
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
+            "$STAGING_USER@$STAGING_HOST" \
+            "cd \$HOME/arima-staging && export ARIMA_IMAGE='$PREVIOUS_IMAGE' && docker compose -f compose.yml pull && docker compose -f compose.yml up -d --remove-orphans"
       - name: Remove temporary SSH material
         if: always()
         run: rm -f "$RUNNER_TEMP/arima_staging_key" "$RUNNER_TEMP/arima_known_hosts"

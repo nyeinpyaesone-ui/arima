@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/nyeinpyaesone-ui/arima/internal/auth"
 )
 
 type healthResponse struct {
@@ -12,10 +14,22 @@ type healthResponse struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+type identityResponse struct {
+	Subject  string `json:"subject"`
+	TenantID string `json:"tenant_id"`
+}
+
 func New() http.Handler {
+	return NewWithVerifier(nil)
+}
+
+// NewWithVerifier registers protected API routes using the supplied trusted verifier.
+// When verifier is nil, protected routes fail closed with 503 while health endpoints remain available.
+func NewWithVerifier(verifier auth.TokenVerifier) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health("live"))
 	mux.HandleFunc("GET /health/ready", health("ready"))
+	mux.Handle("GET /api/v1/me", auth.RequireBearer(verifier, http.HandlerFunc(currentIdentity)))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -24,6 +38,15 @@ func New() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"service": "arima-erp-api", "status": "running", "docs": "https://github.com/nyeinpyaesone-ui/arima/blob/main/api/openapi/openapi.yaml"})
 	})
 	return securityHeaders(mux)
+}
+
+func currentIdentity(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, identityResponse{Subject: principal.Subject, TenantID: principal.TenantID})
 }
 
 func health(status string) http.HandlerFunc {

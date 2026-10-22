@@ -40,6 +40,9 @@ func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
 		t.Fatalf("apply tenant migration to isolated test database: %v", err)
 	}
+	if err := VerifySchema(ctx, db); err != nil {
+		t.Fatalf("verify migrated schema and forced tenant RLS: %v", err)
+	}
 	_, err = db.ExecContext(ctx, `
 DO $$
 BEGIN

@@ -1,0 +1,26 @@
+services:
+  arima-api:
+    image: ${ARIMA_IMAGE:?Set ARIMA_IMAGE to an immutable GHCR image tag}
+    container_name: arima-api
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    environment:
+      ARIMA_ADDR: ":8080"
+    ports:
+      # Bind to loopback; terminate TLS at an explicitly configured reverse proxy.
+      - "127.0.0.1:8080:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

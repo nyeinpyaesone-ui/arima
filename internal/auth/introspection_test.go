@@ -17,11 +17,11 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func verifierForResponse(status int, body string) *IntrospectionVerifier {
 	v := &IntrospectionVerifier{
 		endpoint: "https://idp.example.test/oauth/introspect",
-		issuer: "https://idp.example.test/",
+		issuer:   "https://idp.example.test/",
 		audience: "arima-api",
 		clientID: "arima-client",
-		secret: "test-secret",
-		now: func() time.Time { return time.Unix(1_800_000_000, 0) },
+		secret:   "test-secret",
+		now:      func() time.Time { return time.Unix(1_800_000_000, 0) },
 	}
 	v.client = &http.Client{Timeout: time.Second, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		user, pass, ok := req.BasicAuth()
@@ -37,9 +37,9 @@ func verifierForResponse(status int, body string) *IntrospectionVerifier {
 		}
 		return &http.Response{
 			StatusCode: status,
-			Header: make(http.Header),
-			Body: io.NopCloser(strings.NewReader(body)),
-			Request: req,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
 		}, nil
 	})}
 	return v
@@ -58,9 +58,9 @@ func TestIntrospectionVerifierAcceptsActiveMatchingToken(t *testing.T) {
 
 func TestIntrospectionVerifierRejectsInvalidResponses(t *testing.T) {
 	cases := []struct {
-		name string
+		name   string
 		status int
-		body string
+		body   string
 	}{
 		{"inactive", http.StatusOK, `{"active":false}`},
 		{"issuer mismatch", http.StatusOK, `{"active":true,"iss":"https://attacker.example/","aud":"arima-api","sub":"u","tenant_id":"t","exp":1800000100}`},
@@ -83,10 +83,10 @@ func TestIntrospectionVerifierRejectsInvalidResponses(t *testing.T) {
 func TestNewIntrospectionVerifierRequiresHTTPSAndCompleteConfiguration(t *testing.T) {
 	base := IntrospectionConfig{
 		Endpoint: "https://idp.example.test/introspect",
-		Issuer: "https://idp.example.test/",
+		Issuer:   "https://idp.example.test/",
 		Audience: "arima-api",
 		ClientID: "arima-client",
-		Secret: "secret",
+		Secret:   "secret",
 	}
 	if _, err := NewIntrospectionVerifier(base); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -107,7 +107,9 @@ func TestVerifierEnvironmentMustBeAllOrNone(t *testing.T) {
 		t.Fatalf("empty config: verifier=%v err=%v", verifier, err)
 	}
 	if _, err := NewIntrospectionVerifierFromEnv(func(key string) string {
-		if key == "ARIMA_OIDC_ISSUER" { return "https://idp.example.test/" }
+		if key == "ARIMA_OIDC_ISSUER" {
+			return "https://idp.example.test/"
+		}
 		return ""
 	}); err == nil {
 		t.Fatal("expected partial configuration to fail")

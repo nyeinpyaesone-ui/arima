@@ -9,12 +9,12 @@ import (
 )
 
 const (
-	defaultAddr               = ":8080"
-	defaultReadHeaderTimeout  = 5 * time.Second
-	defaultReadTimeout        = 15 * time.Second
-	defaultWriteTimeout       = 15 * time.Second
-	defaultIdleTimeout        = 60 * time.Second
-	maxHTTPTimeout            = 5 * time.Minute
+	defaultAddr              = ":8080"
+	defaultReadHeaderTimeout = 5 * time.Second
+	defaultReadTimeout       = 15 * time.Second
+	defaultWriteTimeout      = 15 * time.Second
+	defaultIdleTimeout       = 60 * time.Second
+	maxHTTPTimeout           = 5 * time.Minute
 )
 
 // Config contains validated, non-secret process configuration.

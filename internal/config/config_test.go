@@ -26,11 +26,11 @@ func TestLoadFromEnvUsesSafeDefaults(t *testing.T) {
 
 func TestLoadFromEnvAcceptsExplicitValues(t *testing.T) {
 	cfg, err := LoadFromEnv(env(map[string]string{
-		"ARIMA_ADDR": ":9090",
+		"ARIMA_ADDR":                ":9090",
 		"ARIMA_READ_HEADER_TIMEOUT": "3s",
-		"ARIMA_READ_TIMEOUT": "10s",
-		"ARIMA_WRITE_TIMEOUT": "20s",
-		"ARIMA_IDLE_TIMEOUT": "90s",
+		"ARIMA_READ_TIMEOUT":        "10s",
+		"ARIMA_WRITE_TIMEOUT":       "20s",
+		"ARIMA_IDLE_TIMEOUT":        "90s",
 	}))
 	if err != nil {
 		t.Fatal(err)

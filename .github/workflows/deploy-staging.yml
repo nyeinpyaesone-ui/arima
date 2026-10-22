@@ -1,0 +1,104 @@
+name: Deploy ARIMA Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      acknowledge:
+        description: Confirm staging-only deployment of the current main commit
+        required: true
+        type: choice
+        options:
+          - "I confirm staging deployment"
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: arima-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    if: github.ref == 'refs/heads/main' && inputs.acknowledge == 'I confirm staging deployment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate staging secrets
+        shell: bash
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          for name in STAGING_HOST STAGING_USER STAGING_SSH_PRIVATE_KEY STAGING_KNOWN_HOSTS GHCR_USERNAME GHCR_READ_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required staging environment secret: $name"
+              exit 1
+            fi
+          done
+          [[ "$STAGING_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "::error::Invalid STAGING_HOST format."; exit 1; }
+          [[ "$STAGING_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "::error::Invalid STAGING_USER format."; exit 1; }
+          [[ "$GHCR_USERNAME" =~ ^[A-Za-z0-9-]+$ ]] || { echo "::error::Invalid GHCR_USERNAME format."; exit 1; }
+          install -m 600 /dev/null "$RUNNER_TEMP/arima_staging_key"
+          printf '%s\n' "$STAGING_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/arima_staging_key"
+          install -m 600 /dev/null "$RUNNER_TEMP/arima_known_hosts"
+          printf '%s\n' "$STAGING_KNOWN_HOSTS" > "$RUNNER_TEMP/arima_known_hosts"
+          ssh-keygen -y -f "$RUNNER_TEMP/arima_staging_key" >/dev/null
+          ssh-keygen -F "$STAGING_HOST" -f "$RUNNER_TEMP/arima_known_hosts" >/dev/null
+      - name: Authenticate to staging host and registry
+        shell: bash
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_READ_TOKEN" | ssh -i "$RUNNER_TEMP/arima_staging_key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
+            "$STAGING_USER@$STAGING_HOST" \
+            "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
+      - name: Transfer Compose configuration
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
+            "$STAGING_USER@$STAGING_HOST" 'mkdir -p "$HOME/arima-staging"'
+          scp -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
+            deploy/compose.staging.yml "$STAGING_USER@$STAGING_HOST:arima-staging/compose.yml"
+      - name: Deploy immutable image to staging
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
+            "$STAGING_USER@$STAGING_HOST" \
+            "cd \$HOME/arima-staging && export ARIMA_IMAGE='$IMAGE' && docker compose -f compose.yml config -q && docker compose -f compose.yml pull && docker compose -f compose.yml up -d --remove-orphans"
+      - name: Verify staging health
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
+            "$STAGING_USER@$STAGING_HOST" \
+            'for i in $(seq 1 20); do if curl --fail --silent --show-error http://127.0.0.1:8080/health/ready >/dev/null; then echo "Staging health check passed"; exit 0; fi; sleep 3; done; docker compose -f "$HOME/arima-staging/compose.yml" ps; exit 1'
+      - name: Remove temporary SSH material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/arima_staging_key" "$RUNNER_TEMP/arima_known_hosts"

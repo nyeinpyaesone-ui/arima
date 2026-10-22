@@ -47,9 +47,6 @@ func main() {
 		}
 		dbCloser = db
 		dbPing = db.PingContext
-		if _, err := store.NewPostgres(db); err != nil {
-			log.Fatalf("initialize PostgreSQL store: %v", err)
-		}
 	}
 	if dbCloser != nil {
 		defer dbCloser.Close()

@@ -41,12 +41,12 @@ func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 		t.Fatalf("apply tenant migration to isolated test database: %v", err)
 	}
 	_, err = db.ExecContext(ctx, `
-DO $
+DO $$
 BEGIN
 	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arima_runtime') THEN
 		CREATE ROLE arima_runtime LOGIN PASSWORD 'arima_test_password' NOSUPERUSER NOBYPASSRLS;
 	END IF;
-END $;
+END $$;
 GRANT CONNECT ON DATABASE arima_test TO arima_runtime;
 GRANT USAGE ON SCHEMA public TO arima_runtime;
 GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, outbox_events TO arima_runtime;`)

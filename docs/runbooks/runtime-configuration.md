@@ -8,6 +8,7 @@ This runbook covers HTTP listener/timeouts and optional OAuth token introspectio
 
 | Variable | Default | Validation |
 | --- | --- | --- |
+| `ARIMA_ENV` | development | Set to `production` to require authentication configuration |
 | `ARIMA_ADDR` | `:8080` | Must be `host:port` or `:port`; port must be 1–65535 |
 | `ARIMA_READ_HEADER_TIMEOUT` | `5s` | Go duration greater than 0 and no more than 5m |
 | `ARIMA_READ_TIMEOUT` | `15s` | Go duration greater than 0 and no more than 5m |
@@ -24,7 +25,7 @@ Configure all five or none:
 - `ARIMA_OIDC_CLIENT_ID`: introspection client ID.
 - `ARIMA_OIDC_CLIENT_SECRET`: secret-manager value; never commit it.
 
-The identity provider must validate token signatures and active/revocation status and return RFC 7662 JSON with `active`, `iss`, `aud`, `exp`, `sub`, and `tenant_id`. Partial configuration fails startup. With all five unset, the service starts for health probes, but `GET /api/v1/me` returns 503; it is not an authenticated deployment.
+The identity provider must validate token signatures and active/revocation status and return RFC 7662 JSON with `active`, `iss`, `aud`, `exp`, `sub`, and `tenant_id`. Partial configuration fails startup. When `ARIMA_ENV=production`, all five authentication values are mandatory; otherwise startup fails. Outside production, if all five are unset, the service starts for health probes but `GET /api/v1/me` returns 503.
 
 See [environment example](../../configs/arima.env.example) and [authentication boundary](../security/authentication-boundary.md). The application does not automatically load dotenv files.
 
@@ -33,6 +34,7 @@ See [environment example](../../configs/arima.env.example) and [authentication b
 From the repository root:
 
 ```sh
+export ARIMA_ENV=development
 export ARIMA_ADDR='127.0.0.1:8080'
 export ARIMA_READ_HEADER_TIMEOUT='5s'
 export ARIMA_READ_TIMEOUT='15s'
@@ -53,16 +55,17 @@ curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
 curl -i http://127.0.0.1:8080/api/v1/me
 ```
 
-The first two endpoints report process-level health only. Without the optional identity configuration, the protected identity route should return 503. With configuration, missing/invalid bearer credentials should return 401 and a valid token should return the verified identity.
+The first two endpoints report process-level health only. Without identity configuration, the protected identity route should return 503. With configuration, missing/invalid bearer credentials should return 401 and a valid token should return the verified identity.
 
 ## Deployment rules
 
-1. Set configuration explicitly in the deployment platform; do not commit real environment files or credentials.
-2. Bind to `:8080` inside a container only when the platform/network policy expects all interfaces. For local-only development, use `127.0.0.1:8080`.
-3. Put TLS termination at a trusted ingress/load balancer or add explicit TLS configuration before exposing the service directly to an untrusted network.
-4. Keep the listener private until provider validation, authorization, dependency-aware readiness, tenant-scoped persistence, and operational controls are implemented.
-5. Change timeouts only from observed request-duration and traffic data; defaults are not measured production SLOs.
-6. Treat invalid configuration as a deployment failure. Do not silently fall back from malformed values.
+1. Set `ARIMA_ENV=production` in production. The executable refuses to start without complete authentication configuration.
+2. Store the client secret in the deployment secret manager; do not commit real environment files or credentials.
+3. Bind to `:8080` inside a container only when the platform/network policy expects all interfaces. For local-only development, use `127.0.0.1:8080`.
+4. Put TLS termination at a trusted ingress/load balancer or add explicit TLS configuration before exposing the service directly to an untrusted network.
+5. Keep the listener private until provider validation, authorization, dependency-aware readiness, tenant-scoped persistence, and operational controls are implemented.
+6. Change timeouts only from observed request-duration and traffic data; defaults are not measured production SLOs.
+7. Treat invalid configuration as a deployment failure. Do not silently fall back from malformed values.
 
 ## Verification and rollback
 

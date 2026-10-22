@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       acknowledge:
-        description: Confirm staging-only deployment of the current main commit
+        description: Confirm staging-only deployment of the selected main commit
         required: true
         type: choice
         options:
@@ -12,123 +12,110 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: arima-staging-deploy
   cancel-in-progress: false
 
 jobs:
-  deploy-staging:
+  build-and-deploy-staging:
+    name: Build immutable image and request staging rollout
     if: github.ref == 'refs/heads/main' && inputs.acknowledge == 'I confirm staging deployment'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     environment: staging
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Validate staging secrets
-        shell: bash
+      - name: Checkout selected main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish immutable image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+
+      - name: Validate provider adapter configuration
         env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
-          STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+          STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+          STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+        shell: bash
         run: |
           set -euo pipefail
-          for name in STAGING_HOST STAGING_USER STAGING_SSH_PRIVATE_KEY STAGING_KNOWN_HOSTS GHCR_USERNAME GHCR_READ_TOKEN; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "::error::Missing required staging environment secret: $name"
-              exit 1
+          test -n "$STAGING_DEPLOY_HOOK_URL" || {
+            echo "::error::Configure staging secret STAGING_DEPLOY_HOOK_URL for the reviewed provider adapter."
+            exit 1
+          }
+          test -n "$STAGING_HEALTHCHECK_URL" || {
+            echo "::error::Configure staging variable STAGING_HEALTHCHECK_URL."
+            exit 1
+          }
+          case "$STAGING_DEPLOY_HOOK_URL" in https://*) ;; *) echo "::error::Deployment adapter URL must use HTTPS."; exit 1;; esac
+          case "$STAGING_HEALTHCHECK_URL" in https://*) ;; *) echo "::error::Health-check URL must use HTTPS."; exit 1;; esac
+
+      - name: Request staging rollout of exact image digest
+        env:
+          STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+          IMAGE_REF: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_DIGEST" || { echo "::error::Image digest output is empty."; exit 1; }
+          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{image:$image,digest:$digest,commit:$commit,environment:"staging"}')"
+          # This endpoint must be a reviewed adapter that authenticates the request,
+          # allow-lists this repository, and deploys the exact digest only to staging.
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --connect-timeout 10 --max-time 30 \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            "$STAGING_DEPLOY_HOOK_URL")"
+          case "$status" in
+            2*) echo "Staging adapter accepted the rollout request (HTTP $status)." ;;
+            *) echo "::error::Staging adapter rejected the rollout request (HTTP $status)."; exit 1 ;;
+          esac
+
+      - name: Verify staging readiness
+        env:
+          STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$STAGING_HEALTHCHECK_URL" -o /tmp/arima-health.json; then
+              if jq -e '.status == "ready"' /tmp/arima-health.json >/dev/null; then
+                echo "Staging process readiness endpoint reports ready."
+                exit 0
+              fi
             fi
+            sleep 10
           done
-          [[ "$STAGING_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "::error::Invalid STAGING_HOST format."; exit 1; }
-          [[ "$STAGING_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "::error::Invalid STAGING_USER format."; exit 1; }
-          [[ "$GHCR_USERNAME" =~ ^[A-Za-z0-9-]+$ ]] || { echo "::error::Invalid GHCR_USERNAME format."; exit 1; }
-          install -m 600 /dev/null "$RUNNER_TEMP/arima_staging_key"
-          printf '%s\n' "$STAGING_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/arima_staging_key"
-          install -m 600 /dev/null "$RUNNER_TEMP/arima_known_hosts"
-          printf '%s\n' "$STAGING_KNOWN_HOSTS" > "$RUNNER_TEMP/arima_known_hosts"
-          ssh-keygen -y -f "$RUNNER_TEMP/arima_staging_key" >/dev/null
-          ssh-keygen -F "$STAGING_HOST" -f "$RUNNER_TEMP/arima_known_hosts" >/dev/null
-      - name: Authenticate to staging host and registry
-        shell: bash
-        env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
-        run: |
-          set -euo pipefail
-          printf '%s' "$GHCR_READ_TOKEN" | ssh -i "$RUNNER_TEMP/arima_staging_key" \
-            -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
-            "$STAGING_USER@$STAGING_HOST" \
-            "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
-      - name: Transfer Compose configuration
-        env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-        run: |
-          set -euo pipefail
-          ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
-            "$STAGING_USER@$STAGING_HOST" 'mkdir -p "$HOME/arima-staging"'
-          scp -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
-            deploy/compose.staging.yml "$STAGING_USER@$STAGING_HOST:arima-staging/compose.yml"
-      - name: Record current image for rollback
-        id: previous
-        env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          previous="$(ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
-            "$STAGING_USER@$STAGING_HOST" 'docker inspect --format "{{.Config.Image}}" arima-api 2>/dev/null || true')"
-          if [[ "$previous" =~ ^ghcr\.io/nyeinpyaesone-ui/arima:sha-[0-9a-f]{40}$ ]]; then
-            echo "image=$previous" >> "$GITHUB_OUTPUT"
-            echo "Previous immutable image recorded for rollback."
-          else
-            echo "image=" >> "$GITHUB_OUTPUT"
-            echo "No recognized previous immutable image; first deployment cannot auto-rollback."
-          fi
-      - name: Deploy immutable image to staging
-        env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-          IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
-        run: |
-          set -euo pipefail
-          ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
-            "$STAGING_USER@$STAGING_HOST" \
-            "cd \$HOME/arima-staging && export ARIMA_IMAGE='$IMAGE' && docker compose -f compose.yml config -q && docker compose -f compose.yml pull && docker compose -f compose.yml up -d --remove-orphans"
-      - name: Verify staging health
-        env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-        run: |
-          set -euo pipefail
-          ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
-            "$STAGING_USER@$STAGING_HOST" \
-            'for i in $(seq 1 20); do if curl --fail --silent --show-error http://127.0.0.1:8080/health/ready >/dev/null; then echo "Staging health check passed"; exit 0; fi; sleep 3; done; docker compose -f "$HOME/arima-staging/compose.yml" ps; exit 1'
-      - name: Roll back to previous image if health verification fails
-        if: failure() && steps.previous.outputs.image != ''
-        env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-          PREVIOUS_IMAGE: ${{ steps.previous.outputs.image }}
-        run: |
-          set -euo pipefail
-          ssh -i "$RUNNER_TEMP/arima_staging_key" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/arima_known_hosts" \
-            "$STAGING_USER@$STAGING_HOST" \
-            "cd \$HOME/arima-staging && export ARIMA_IMAGE='$PREVIOUS_IMAGE' && docker compose -f compose.yml pull && docker compose -f compose.yml up -d --remove-orphans"
-      - name: Remove temporary SSH material
+          echo "::error::Staging did not report ready within five minutes. Use the provider's reviewed rollback controls and inspect redacted logs."
+          exit 1
+
+      - name: State deployment boundary
         if: always()
-        run: rm -f "$RUNNER_TEMP/arima_staging_key" "$RUNNER_TEMP/arima_known_hosts"
+        run: echo "Staging only. No production promotion or database migration is performed by this workflow."

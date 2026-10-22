@@ -104,7 +104,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$STAGING_HEALTHCHECK_URL" -o /tmp/arima-health.json; then
               if jq -e '.status == "ready"' /tmp/arima-health.json >/dev/null; then
                 echo "Staging process readiness endpoint reports ready."

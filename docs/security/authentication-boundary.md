@@ -2,35 +2,32 @@
 
 ## Implementation
 
-The executable can use OAuth 2.0 token introspection (RFC 7662) through `internal/auth.IntrospectionVerifier`. The authorization server must authenticate the client, validate token signature and active status, and return the expected claims. ARIMA sends introspection requests over HTTPS with HTTP Basic client authentication and does not log bearer tokens.
+The executable uses the maintained `github.com/coreos/go-oidc/v3/oidc` verifier. It discovers provider metadata from the configured issuer and validates JWT signature, exact issuer, configured audience, expiry and not-before using the provider's JWKS endpoint. The remote key set supports signing-key rotation. Provider discovery is bounded by a 10-second startup context; production startup fails if discovery or authentication configuration fails.
 
-Required environment variables (configure all or none):
+Required variables:
 
-- `ARIMA_OIDC_INTROSPECTION_URL`: absolute HTTPS endpoint, DNS hostname required.
-- `ARIMA_OIDC_ISSUER`: exact expected `iss` claim.
-- `ARIMA_OIDC_AUDIENCE`: required `aud` value.
-- `ARIMA_OIDC_CLIENT_ID`: introspection client identifier.
-- `ARIMA_OIDC_CLIENT_SECRET`: secret supplied by the deployment secret manager.
+- `ARIMA_OIDC_ISSUER`: exact issuer URL from the provider's discovery metadata.
+- `ARIMA_OIDC_AUDIENCE`: API audience expected in the access token.
 
-The verifier requires an active response, exact issuer, matching audience, future expiry, valid optional not-before, non-empty subject, and non-empty `tenant_id`. Introspection calls have a five-second timeout. If no auth variables are configured, protected routes fail closed with 503. Partial or malformed configuration stops startup.
+Configure both or leave both unset outside production. The verified token must contain non-empty `sub` and `tenant_id` claims. Use an access token intended for ARIMA; do not assume an ID token issued to a different client is an acceptable API credential.
 
 ## Protected route
 
-`GET /api/v1/me` is wired through the bearer middleware. With valid authentication it returns only the verified subject and tenant ID. Health endpoints remain unauthenticated for platform probes. The root endpoint is informational only.
+`GET /api/v1/me` is wired through bearer middleware. Valid credentials return only the verified subject and tenant ID. Health endpoints remain unauthenticated for platform probes. When authentication is absent outside production, protected routes fail closed with 503; missing or invalid credentials return 401.
 
 ## Security boundaries and limitations
 
-- The authorization server, not this API, validates the token's cryptographic signature and active status. Use a vetted provider that enforces approved signing algorithms, issuer, audience, expiry/not-before, revocation and key rotation.
-- This is token introspection, not local JWT signature verification. Do not configure an endpoint that merely decodes JWT claims.
-- A tenant ID claim is an identity attribute, not sufficient authorization by itself. Data access must still apply tenant predicates and role/policy checks server-side.
-- The current API has no database persistence or business mutation routes. No tenant isolation guarantee for persisted records is claimed.
-- Keep the listener private until deployment TLS, ingress restrictions, identity-provider configuration, authorization, dependency-aware readiness, and operational controls are reviewed.
+- Signature, issuer, audience, expiry/not-before validation and JWKS refresh are delegated to the vetted OIDC library; the application does not parse JWTs manually.
+- The selected identity provider and its access-token claim contract have not yet been integration-tested. Before production, test invalid signatures, wrong issuer/audience, expiry, not-before, unknown/rotated signing keys, missing tenant claim, provider outage and revocation semantics.
+- A tenant ID claim is an identity attribute, not sufficient authorization. Data access must apply tenant predicates and PostgreSQL RLS; role/policy authorization must still be implemented server-side.
+- The PostgreSQL tenant repository and schema are foundational primitives; business resource/action routes are not enabled. No end-to-end ERP production readiness is claimed.
+- Keep the listener private until identity-provider tests, database grants/RLS tests, authorization, TLS ingress, and operational controls are reviewed.
 
 ## Deployment verification
 
-1. Provision a dedicated introspection client and least-privilege secret in the identity provider.
-2. Store the client secret in the deployment secret manager; never commit it or place it in logs.
-3. Set all five environment variables, ensuring issuer and audience exactly match provider output.
-4. Verify no credentials returns 503 from `GET /api/v1/me`, missing/invalid credentials return 401, and a valid token returns the expected subject and tenant.
-5. Test expired, revoked, wrong-issuer, wrong-audience, and missing-tenant tokens against the actual identity provider before exposing the API.
-6. Rotate the introspection secret through the secret manager and confirm the provider accepts the new credential before revoking the old one.
+1. Set issuer and audience from authoritative provider configuration; never guess either value.
+2. Configure `ARIMA_DATABASE_URL` from a secret manager. Production startup requires a successful PostgreSQL ping.
+3. Verify no authentication config gives 503 from `GET /api/v1/me`, invalid credentials give 401, and a valid access token returns the expected subject and tenant.
+4. Exercise key rotation and provider outage in staging before exposure.
+5. Keep the runtime database role non-superuser and without `BYPASSRLS`; test tenant isolation under that role.
+6. Require green GitHub Actions for the exact head commit before merging.

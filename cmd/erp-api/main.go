@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
 	"github.com/nyeinpyaesone-ui/arima/internal/config"
@@ -18,6 +19,9 @@ func main() {
 	verifier, err := auth.NewIntrospectionVerifierFromEnv(os.Getenv)
 	if err != nil {
 		log.Fatalf("invalid authentication configuration: %v", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("ARIMA_ENV")), "production") && verifier == nil {
+		log.Fatal("ARIMA_ENV=production requires complete OAuth token introspection configuration")
 	}
 
 	server := &http.Server{

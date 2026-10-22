@@ -2,9 +2,9 @@
 
 ## Scope
 
-This runbook defines the executable's HTTP listener and timeout configuration. It does not configure an identity provider, database, tenant, or business integration. Those are not wired into the current executable yet.
+This runbook covers HTTP listener/timeouts and optional OAuth token introspection. Database connectivity, persistence, tenant-isolation enforcement for stored records, and business mutations are not implemented.
 
-## Supported variables
+## Supported HTTP variables
 
 | Variable | Default | Validation |
 | --- | --- | --- |
@@ -14,7 +14,19 @@ This runbook defines the executable's HTTP listener and timeout configuration. I
 | `ARIMA_WRITE_TIMEOUT` | `15s` | Go duration greater than 0 and no more than 5m |
 | `ARIMA_IDLE_TIMEOUT` | `60s` | Go duration greater than 0 and no more than 5m |
 
-See [arima.env.example](../../configs/arima.env.example). The example file is documentation only; the application does not automatically load a dotenv file. Set variables in the process environment or deployment platform.
+## Optional authentication variables
+
+Configure all five or none:
+
+- `ARIMA_OIDC_INTROSPECTION_URL`: HTTPS token introspection endpoint (DNS hostname).
+- `ARIMA_OIDC_ISSUER`: exact expected issuer claim.
+- `ARIMA_OIDC_AUDIENCE`: required audience.
+- `ARIMA_OIDC_CLIENT_ID`: introspection client ID.
+- `ARIMA_OIDC_CLIENT_SECRET`: secret-manager value; never commit it.
+
+The identity provider must validate token signatures and active/revocation status and return RFC 7662 JSON with `active`, `iss`, `aud`, `exp`, `sub`, and `tenant_id`. Partial configuration fails startup. With all five unset, the service starts for health probes, but `GET /api/v1/me` returns 503; it is not an authenticated deployment.
+
+See [environment example](../../configs/arima.env.example) and [authentication boundary](../security/authentication-boundary.md). The application does not automatically load dotenv files.
 
 ## Configure and run locally
 
@@ -33,26 +45,28 @@ test -z "$(gofmt -l ./cmd ./internal)"
 go run ./cmd/erp-api
 ```
 
-In a second terminal, verify the process:
+In another terminal:
 
 ```sh
 curl --fail --silent --show-error http://127.0.0.1:8080/health/live
 curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
+curl -i http://127.0.0.1:8080/api/v1/me
 ```
 
-Both endpoints currently report process-level health. Readiness does not yet check external dependencies because database and identity-provider integrations are not wired.
+The first two endpoints report process-level health only. Without the optional identity configuration, the protected identity route should return 503. With configuration, missing/invalid bearer credentials should return 401 and a valid token should return the verified identity.
 
 ## Deployment rules
 
 1. Set configuration explicitly in the deployment platform; do not commit real environment files or credentials.
 2. Bind to `:8080` inside a container only when the platform/network policy expects all interfaces. For local-only development, use `127.0.0.1:8080`.
 3. Put TLS termination at a trusted ingress/load balancer or add explicit TLS configuration before exposing the service directly to an untrusted network.
-4. Keep the listener private until authentication, authorization, dependency-aware readiness, and operational controls are implemented.
-5. Change timeouts only from observed request-duration and traffic data; the current defaults are starting values, not measured production SLOs.
+4. Keep the listener private until provider validation, authorization, dependency-aware readiness, tenant-scoped persistence, and operational controls are implemented.
+5. Change timeouts only from observed request-duration and traffic data; defaults are not measured production SLOs.
 6. Treat invalid configuration as a deployment failure. Do not silently fall back from malformed values.
 
 ## Verification and rollback
 
-- Run the full CI workflow and require a green result before merging.
-- In the target environment, verify the configured bind address, liveness response, logs, and restart behavior.
-- If a configuration rollout fails, restore the previous known-good environment values and redeploy the prior image. Do not alter database schemas as part of this rollback; this change introduces no database migrations.
+- Require green GitHub Actions for the exact proposed commit before merging.
+- Test wrong issuer/audience, expired/revoked tokens, provider errors, missing tenant claims, and secret rotation against the real identity provider.
+- Verify bind address, liveness response, logs, and restart behavior in the target environment.
+- On a configuration rollout failure, restore the previous known-good environment values and redeploy the prior image. No database migrations are included in this stage.

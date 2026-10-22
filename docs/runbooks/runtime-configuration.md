@@ -2,7 +2,7 @@
 
 ## Scope
 
-This runbook covers HTTP listener/timeouts and OIDC JWT validation. Database persistence, tenant isolation for stored records, role/policy authorization, persistent audit, idempotency and outbox are not yet implemented.
+This runbook covers HTTP listener/timeouts and OIDC JWT validation. Tenant-scoped PostgreSQL schema and repository primitives exist, including RLS, audit, idempotency and outbox tables. Business routes, authorization policies, outbox delivery workers and end-to-end atomic business workflows are not implemented yet.
 
 ## Supported variables
 
@@ -16,6 +16,7 @@ This runbook covers HTTP listener/timeouts and OIDC JWT validation. Database per
 | `ARIMA_IDLE_TIMEOUT` | `60s` | Go duration greater than 0 and no more than 5m |
 | `ARIMA_OIDC_ISSUER` | unset | Exact issuer URL from provider metadata |
 | `ARIMA_OIDC_AUDIENCE` | unset | Expected API audience |
+| `ARIMA_DATABASE_URL` | unset | PostgreSQL DSN; required in production |
 
 Configure both OIDC variables or neither outside production. Production startup fails if either is absent or provider discovery fails. Discovery is attempted with a 10-second startup timeout.
 
@@ -51,9 +52,22 @@ curl -i http://127.0.0.1:8080/api/v1/me
 
 Health endpoints report process-level status only. Without OIDC configuration, the protected identity route returns 503. With a verifier configured, missing/invalid bearer credentials return 401.
 
+## PostgreSQL setup and migration
+
+The service requires `ARIMA_DATABASE_URL` in production and pings PostgreSQL before binding. The `/health/ready` endpoint returns 503 when the configured database ping fails. Use a dedicated migration identity to apply reviewed migrations; the application deliberately does not mutate schema at startup.
+
+```sh
+export ARIMA_DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require'
+psql "$ARIMA_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0001_tenant_foundation.up.sql
+```
+
+Supply credentials through a secret manager, not shell history or committed files. Test migrations and rollback on a disposable PostgreSQL 15 database first. The down migration deletes tenant records, audit history, idempotency state and outbox events; use only after an approved backup and explicit data-loss approval. CI provisions a separate `arima_test` PostgreSQL database and runs the tenant-isolation integration test against it.
+
+The repository's tenant transaction API sets `app.tenant_id` transaction-locally from the verified principal and the migration forces RLS on tenant-scoped tables. Do not issue queries outside `Postgres.WithinTenant` for tenant data. Ensure the application DB role is least-privileged and cannot bypass RLS; never grant `BYPASSRLS` or superuser to the runtime role. RLS is defense in depth, not a replacement for role/policy authorization.
+
 ## Deployment rules
 
-1. Set `ARIMA_ENV=production`; startup requires OIDC issuer/audience and reachable provider discovery.
+1. Set `ARIMA_ENV=production`; startup requires OIDC issuer/audience, reachable provider discovery, and a working `ARIMA_DATABASE_URL`.
 2. Set `ARIMA_OIDC_ISSUER` and `ARIMA_OIDC_AUDIENCE` from the identity provider's authoritative configuration. Never guess either value.
 3. Keep the service behind a trusted TLS ingress and private network until authorization, tenant-scoped persistence and operational controls are implemented.
 4. Change timeouts only from observed request-duration and traffic data; defaults are not measured production SLOs.

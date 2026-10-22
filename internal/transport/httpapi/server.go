@@ -21,7 +21,7 @@ func New() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"service": "arima-erp-api", "status": "running", "docs": "/api/openapi.yaml"})
+		writeJSON(w, http.StatusOK, map[string]string{"service": "arima-erp-api", "status": "running", "docs": "https://github.com/nyeinpyaesone-ui/arima/blob/main/api/openapi/openapi.yaml"})
 	})
 	return securityHeaders(mux)
 }

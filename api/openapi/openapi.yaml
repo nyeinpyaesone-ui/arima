@@ -1,0 +1,217 @@
+openapi: 3.1.0
+info:
+  title: ARIMA ERP Bridge API
+  version: 0.1.0
+  description: >
+    Contract-first tenant-scoped ERP and AI integration boundary.
+    Only health routes are implemented by the initial executable.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+paths:
+  /health/live:
+    get:
+      operationId: liveness
+      security: []
+      summary: Process liveness
+      responses:
+        '200':
+          description: Process is running
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+  /health/ready:
+    get:
+      operationId: readiness
+      security: []
+      summary: Readiness probe
+      description: Scaffold-only response until dependency checks are wired.
+      responses:
+        '200':
+          description: Process currently accepts requests
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+  /v1/resources/{type}/{id}:
+    get:
+      operationId: getResource
+      summary: Read tenant-scoped ERP resource
+      parameters:
+        - in: path
+          name: type
+          required: true
+          schema: { type: string, enum: [customer, product, inventory, sales_order, purchase_order] }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Resource
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Resource' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/actions:validate:
+    post:
+      operationId: validateAction
+      summary: Validate an action without mutation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActionInput' }
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionValidation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/actions:
+    post:
+      operationId: proposeAction
+      summary: Propose an auditable action; does not execute it
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActionInput' }
+      responses:
+        '201':
+          description: Action proposal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Action' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/actions/{id}:
+    get:
+      operationId: getAction
+      summary: Read action status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Action status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Action' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/actions/{id}:approve:
+    post:
+      operationId: approveAction
+      summary: Approve or reject using an authorized principal
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [approve, reject] }
+                reason: { type: string, minLength: 3, maxLength: 2000 }
+      responses:
+        '200':
+          description: Updated action
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Action' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/actions/{id}:execute:
+    post:
+      operationId: executeAction
+      summary: Execute an approved action with idempotency and version checks
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Execution result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Action' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized: { description: Missing or invalid authentication }
+    Forbidden: { description: Principal lacks tenant-scoped permission }
+    NotFound: { description: Resource absent within authorized tenant scope }
+    Conflict: { description: Idempotency conflict, stale version, or invalid state transition }
+  schemas:
+    Health:
+      type: object
+      required: [status, service, timestamp]
+      properties:
+        status: { type: string }
+        service: { type: string }
+        timestamp: { type: string, format: date-time }
+    Resource:
+      type: object
+      required: [id, type, tenant_id, version, data]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        tenant_id: { type: string }
+        version: { type: string }
+        data: { type: object, additionalProperties: true }
+        updated_at: { type: string, format: date-time }
+    ActionInput:
+      type: object
+      required: [action_type, resource_type, resource_id, expected_version, payload, rationale]
+      properties:
+        action_type: { type: string, minLength: 1 }
+        resource_type: { type: string }
+        resource_id: { type: string, minLength: 1 }
+        expected_version: { type: string, minLength: 1 }
+        payload: { type: object, additionalProperties: true }
+        rationale: { type: string, minLength: 3, maxLength: 2000 }
+    ActionValidation:
+      type: object
+      required: [valid, errors, warnings, approval_required]
+      properties:
+        valid: { type: boolean }
+        errors: { type: array, items: { type: string } }
+        warnings: { type: array, items: { type: string } }
+        approval_required: { type: boolean }
+    Action:
+      type: object
+      required: [id, tenant_id, status, action_type, created_at, updated_at]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        status:
+          type: string
+          enum: [proposed, requires_approval, approved, executing, succeeded, rejected, failed]
+        action_type: { type: string }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        result: { type: object, additionalProperties: true }

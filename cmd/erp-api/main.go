@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/config"
 	"github.com/nyeinpyaesone-ui/arima/internal/transport/httpapi"

@@ -4,7 +4,7 @@
 
 This runbook describes a **managed-container-platform adapter** for staging. The repository does not yet identify a specific provider, so the workflow calls a provider adapter rather than pretending that a generic platform deploy hook is universally compatible.
 
-The workflow is manually dispatched from `main`, requires explicit acknowledgement, uses the protected GitHub Environment `staging`, builds an immutable commit-tagged multi-architecture GHCR image, requests a rollout using the image digest, and polls the configured HTTPS health endpoint. It does not deploy production or run migrations.
+The workflow is manually dispatched from `main`, requires explicit acknowledgement, uses the protected GitHub Environment `staging`, builds a commit-tagged multi-architecture GHCR image and requests a rollout pinned to the exact immutable image digest, and polls the configured HTTPS health endpoint. It does not deploy production or run migrations.
 
 ## Required GitHub Environment
 

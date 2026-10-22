@@ -2,15 +2,15 @@
 
 **Go-first ERP core and AI integration bridge.** This repository establishes a production-oriented foundation for domain APIs, typed AI tool contracts, auditable actions, and reliable event delivery.
 
-> Status: engineering foundation. Contracts and scaffolding are not yet a production ERP implementation.
+> Status: engineering foundation. The current executable is not a production ERP implementation.
 
 ## Principles
 - Correctness before performance; explicit tenant and authorization boundaries.
 - Business rules remain in the ERP core, never in the AI orchestrator.
-- Mutations are idempotent, audited, version-checked, and approval-gated by policy.
-- Transactional outbox for reliable event publication; avoid dual writes.
-- OpenAPI 3.1 for HTTP and Protobuf for gRPC contracts.
-- CI quality gates; deployment requires explicit environment configuration.
+- Mutations must be idempotent, audited, version-checked, and approval-gated by policy.
+- Use a transactional outbox for reliable event publication; avoid dual writes.
+- OpenAPI for HTTP and Protobuf for gRPC contracts.
+- Require verified CI before merging.
 
 ## Quick start
 Requirements: Go 1.23+.
@@ -25,8 +25,6 @@ curl -fsS http://localhost:8080/health/ready
 
 ## Runtime configuration
 
-The executable validates these environment variables before listening:
-
 | Variable | Default |
 | --- | --- |
 | `ARIMA_ADDR` | `:8080` |
@@ -35,19 +33,36 @@ The executable validates these environment variables before listening:
 | `ARIMA_WRITE_TIMEOUT` | `15s` |
 | `ARIMA_IDLE_TIMEOUT` | `60s` |
 
-Timeout values use Go duration syntax and must be greater than zero and no more than five minutes. Invalid values stop startup rather than silently falling back. See [runtime configuration runbook](docs/runbooks/runtime-configuration.md) and [environment example](configs/arima.env.example). The application does not automatically read .env files.
+Timeouts use Go duration syntax and must be greater than zero and no more than five minutes. Invalid values stop startup. The application does not automatically load dotenv files.
+
+## Optional OAuth token introspection
+
+Configure all five variables or leave all unset:
+
+- `ARIMA_OIDC_INTROSPECTION_URL`: HTTPS introspection endpoint.
+- `ARIMA_OIDC_ISSUER`: exact issuer claim.
+- `ARIMA_OIDC_AUDIENCE`: expected API audience.
+- `ARIMA_OIDC_CLIENT_ID`: introspection client ID.
+- `ARIMA_OIDC_CLIENT_SECRET`: secret-manager value only; never commit it.
+
+The identity provider must validate token signature and active/revocation status and return `active`, `iss`, `aud`, `exp`, `sub`, and `tenant_id`. When auth is unconfigured, `GET /api/v1/me` fails closed with 503. With auth configured, missing/invalid credentials return 401. See [authentication boundary](docs/security/authentication-boundary.md), [runtime runbook](docs/runbooks/runtime-configuration.md), and [environment example](configs/arima.env.example).
+
+## Current implementation boundary
+
+Implemented: health probes, validated HTTP runtime settings, optional token introspection, and a protected identity endpoint. Health readiness is process-level only; it does not check external dependencies.
+
+Not implemented: database persistence, tenant-isolation enforcement for stored records, role/policy authorization, business resource/action routes, audit persistence, idempotency storage, and transactional outbox. OpenAPI contracts for planned endpoints do not mean those routes are live. Do not expose this scaffold as production ERP functionality.
 
 ## Layout
 - `cmd/erp-api`: executable entry point.
+- `internal/auth`: bearer middleware and token introspection.
 - `internal/config`: validated runtime configuration.
-- `internal/transport/httpapi`: HTTP handlers and health endpoints.
+- `internal/transport/httpapi`: health and protected identity endpoints.
 - `api/openapi`: REST contract.
 - `api/proto`: gRPC/Protobuf contract.
-- `docs/architecture`: architectural decisions and boundaries.
+- `docs/architecture`: architecture decisions and boundaries.
 - `docs/runbooks`: operational guidance.
 - `migrations`: reviewed database migration home.
 - `.github/workflows/ci.yml`: formatting, tests, vet and build.
-
-The initial service intentionally exposes only health endpoints. Business-resource and action endpoints are contract-first, not yet implemented. Health readiness currently checks process-level behavior only; it does not validate external dependencies. Do not treat this scaffold as production-ready ERP functionality.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).

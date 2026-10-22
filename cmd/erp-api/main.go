@@ -3,23 +3,26 @@ package main
 import (
 	"log"
 	"net/http"
-	"os"
-	"time"
 
+	"github.com/nyeinpyaesone-ui/arima/internal/config"
 	"github.com/nyeinpyaesone-ui/arima/internal/transport/httpapi"
 )
 
 func main() {
-	addr := os.Getenv("ARIMA_ADDR")
-	if addr == "" {
-		addr = ":8080"
+	cfg, err := config.LoadFromEnv(os.Getenv)
+	if err != nil {
+		log.Fatalf("invalid runtime configuration: %v", err)
 	}
+
 	server := &http.Server{
-		Addr: addr, Handler: httpapi.New(),
-		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
-		WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,
+		Addr:              cfg.Addr,
+		Handler:           httpapi.New(),
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		ReadTimeout:       cfg.ReadTimeout,
+		WriteTimeout:      cfg.WriteTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
 	}
-	log.Printf("ARIMA ERP API listening on %s", addr)
+	log.Printf("ARIMA ERP API listening on %s", cfg.Addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("HTTP server failed: %v", err)
 	}

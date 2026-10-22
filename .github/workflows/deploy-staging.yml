@@ -1,0 +1,135 @@
+name: Deploy ARIMA Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      acknowledge:
+        description: Confirm staging-only deployment of the selected main commit
+        required: true
+        type: choice
+        options:
+          - "I confirm staging deployment"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arima-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy-staging:
+    name: Build image and request digest-pinned staging rollout
+    if: github.ref == 'refs/heads/main' && inputs.acknowledge == 'I confirm staging deployment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: staging
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout selected main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      # Fail before building/publishing anything if the adapter is not configured.
+      - name: Validate provider adapter configuration
+        env:
+          STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+          STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
+          STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_DEPLOY_HOOK_URL" || {
+            echo "::error::Configure staging secret STAGING_DEPLOY_HOOK_URL for the reviewed provider adapter."
+            exit 1
+          }
+          test -n "$STAGING_DEPLOY_TOKEN" || {
+            echo "::error::Configure staging secret STAGING_DEPLOY_TOKEN for authenticated adapter requests."
+            exit 1
+          }
+          test -n "$STAGING_HEALTHCHECK_URL" || {
+            echo "::error::Configure staging variable STAGING_HEALTHCHECK_URL."
+            exit 1
+          }
+          case "$STAGING_DEPLOY_HOOK_URL" in
+            https://*) ;;
+            *) echo "::error::Deployment adapter URL must use HTTPS."; exit 1 ;;
+          esac
+          case "$STAGING_HEALTHCHECK_URL" in
+            https://*) ;;
+            *) echo "::error::Health-check URL must use HTTPS."; exit 1 ;;
+          esac
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image; deployment pins its digest
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+
+      - name: Request staging rollout of exact image digest
+        env:
+          STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+          STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
+          IMAGE_REF: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_DIGEST" || { echo "::error::Image digest output is empty."; exit 1; }
+          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{image:$image,digest:$digest,commit:$commit,environment:"staging"}')"
+          # The adapter must validate this bearer token, allow-list this repo/image,
+          # and deploy the digest only to staging. Never log the token or payload.
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --connect-timeout 10 --max-time 30 \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --header "Authorization: Bearer ${STAGING_DEPLOY_TOKEN}" \
+            --data "$payload" \
+            "$STAGING_DEPLOY_HOOK_URL")"
+          case "$status" in
+            2*) echo "Staging adapter accepted the rollout request (HTTP $status)." ;;
+            *) echo "::error::Staging adapter rejected the rollout request (HTTP $status)."; exit 1 ;;
+          esac
+
+      - name: Verify staging readiness
+        env:
+          STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$STAGING_HEALTHCHECK_URL" -o /tmp/arima-health.json; then
+              if jq -e '.status == "ready"' /tmp/arima-health.json >/dev/null; then
+                echo "Staging process readiness endpoint reports ready."
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "::error::Staging did not report ready within five minutes. Use the provider's reviewed rollback controls and inspect redacted logs."
+          exit 1
+
+      - name: State deployment boundary
+        if: always()
+        run: echo "Staging only. No production promotion or database migration is performed by this workflow."

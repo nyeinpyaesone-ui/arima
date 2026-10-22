@@ -27,17 +27,18 @@ curl -fsS http://localhost:8080/health/ready
 
 | Variable | Default |
 | --- | --- |
+| `ARIMA_ENV` | development |
 | `ARIMA_ADDR` | `:8080` |
 | `ARIMA_READ_HEADER_TIMEOUT` | `5s` |
 | `ARIMA_READ_TIMEOUT` | `15s` |
 | `ARIMA_WRITE_TIMEOUT` | `15s` |
 | `ARIMA_IDLE_TIMEOUT` | `60s` |
 
-Timeouts use Go duration syntax and must be greater than zero and no more than five minutes. Invalid values stop startup. The application does not automatically load dotenv files.
+Timeouts use Go duration syntax and must be greater than zero and no more than five minutes. Invalid values stop startup. The application does not automatically load dotenv files. Set `ARIMA_ENV=production` in production; startup then requires complete authentication configuration.
 
 ## Optional OAuth token introspection
 
-Configure all five variables or leave all unset:
+Configure all five variables or leave all unset outside production:
 
 - `ARIMA_OIDC_INTROSPECTION_URL`: HTTPS introspection endpoint.
 - `ARIMA_OIDC_ISSUER`: exact issuer claim.
@@ -49,7 +50,7 @@ The identity provider must validate token signature and active/revocation status
 
 ## Current implementation boundary
 
-Implemented: health probes, validated HTTP runtime settings, optional token introspection, and a protected identity endpoint. Health readiness is process-level only; it does not check external dependencies.
+Implemented: health probes, validated HTTP runtime settings, optional token introspection, a protected identity endpoint, and a production startup gate requiring authentication. Health readiness is process-level only; it does not check external dependencies.
 
 Not implemented: database persistence, tenant-isolation enforcement for stored records, role/policy authorization, business resource/action routes, audit persistence, idempotency storage, and transactional outbox. OpenAPI contracts for planned endpoints do not mean those routes are live. Do not expose this scaffold as production ERP functionality.
 

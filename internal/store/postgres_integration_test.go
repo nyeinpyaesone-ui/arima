@@ -51,6 +51,9 @@ func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.WithinTenant(ctx, "not-a-uuid", func(*TenantTx) error { return nil }); !errors.Is(err, ErrInvalidTenant) {
+		t.Fatalf("invalid tenant ID should be rejected before opening a transaction, got %v", err)
+	}
 
 	var recordID string
 	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {

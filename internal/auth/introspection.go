@@ -60,10 +60,10 @@ func NewIntrospectionVerifier(cfg IntrospectionConfig) (*IntrospectionVerifier, 
 	}
 	return &IntrospectionVerifier{
 		endpoint: u.String(),
-		issuer: strings.TrimSpace(cfg.Issuer),
+		issuer:   strings.TrimSpace(cfg.Issuer),
 		audience: strings.TrimSpace(cfg.Audience),
 		clientID: strings.TrimSpace(cfg.ClientID),
-		secret: cfg.Secret,
+		secret:   cfg.Secret,
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -82,10 +82,10 @@ func NewIntrospectionVerifierFromEnv(getenv func(string) string) (TokenVerifier,
 	}
 	cfg := IntrospectionConfig{
 		Endpoint: strings.TrimSpace(getenv("ARIMA_OIDC_INTROSPECTION_URL")),
-		Issuer: strings.TrimSpace(getenv("ARIMA_OIDC_ISSUER")),
+		Issuer:   strings.TrimSpace(getenv("ARIMA_OIDC_ISSUER")),
 		Audience: strings.TrimSpace(getenv("ARIMA_OIDC_AUDIENCE")),
 		ClientID: strings.TrimSpace(getenv("ARIMA_OIDC_CLIENT_ID")),
-		Secret: getenv("ARIMA_OIDC_CLIENT_SECRET"),
+		Secret:   getenv("ARIMA_OIDC_CLIENT_SECRET"),
 	}
 	values := []string{cfg.Endpoint, cfg.Issuer, cfg.Audience, cfg.ClientID, cfg.Secret}
 	set := 0

@@ -141,7 +141,13 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 		if err != nil {
 			return err
 		}
-		if !result.Completed || result.ResponseStatus != 200 || string(result.ResponseBody) != `{"accepted":true}` {
+		var replayBody struct {
+			Accepted bool `json:"accepted"`
+		}
+		if err := json.Unmarshal(result.ResponseBody, &replayBody); err != nil {
+			return fmt.Errorf("decode replay response: %w", err)
+		}
+		if !result.Completed || result.ResponseStatus != 200 || !replayBody.Accepted {
 			t.Fatalf("unexpected idempotent replay result: %#v", result)
 		}
 		_, err = tx.BeginIdempotency(ctx, "request-key-0001", []byte(`{"action":"delete","id":"customer-1"}`), time.Hour)

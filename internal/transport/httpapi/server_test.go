@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -89,5 +90,23 @@ func TestUnknownPathIsNotFound(t *testing.T) {
 	New().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestReadinessFailsWhenDependencyIsUnavailable(t *testing.T) {
+	handler := NewWithDependencies(testVerifier{}, func(context.Context) error {
+		return errors.New("database unavailable")
+	})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	var body healthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "not_ready" {
+		t.Fatalf("status body = %q, want not_ready", body.Status)
 	}
 }

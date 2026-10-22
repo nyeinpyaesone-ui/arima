@@ -91,15 +91,25 @@ func (t *TenantTx) UpsertRecord(ctx context.Context, resourceType, externalID st
 	if expectedVersion < 0 {
 		return Record{}, errors.New("expected version cannot be negative")
 	}
-	const query = `
+	var query string
+	var args []any
+	if expectedVersion == 0 {
+		query = `
 INSERT INTO tenant_records (tenant_id, resource_type, external_id, version, payload)
 VALUES ($1::uuid, $2, $3, 1, $4::jsonb)
-ON CONFLICT (tenant_id, resource_type, external_id)
-DO UPDATE SET payload = EXCLUDED.payload, version = tenant_records.version + 1, updated_at = now()
-WHERE tenant_records.version = $5
+ON CONFLICT (tenant_id, resource_type, external_id) DO NOTHING
 RETURNING id::text, tenant_id::text, resource_type, external_id, version, payload, created_at, updated_at`
+		args = []any{t.tenantID, resourceType, externalID, string(payload)}
+	} else {
+		query = `
+UPDATE tenant_records
+SET payload = $4::jsonb, version = version + 1, updated_at = now()
+WHERE tenant_id = $1::uuid AND resource_type = $2 AND external_id = $3 AND version = $5
+RETURNING id::text, tenant_id::text, resource_type, external_id, version, payload, created_at, updated_at`
+		args = []any{t.tenantID, resourceType, externalID, string(payload), expectedVersion}
+	}
 	var record Record
-	err := t.tx.QueryRowContext(ctx, query, t.tenantID, resourceType, externalID, string(payload), expectedVersion).
+	err := t.tx.QueryRowContext(ctx, query, args...).
 		Scan(&record.ID, &record.TenantID, &record.ResourceType, &record.ExternalID, &record.Version, &record.Payload, &record.CreatedAt, &record.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, ErrVersionConflict

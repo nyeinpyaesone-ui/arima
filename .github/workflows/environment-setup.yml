@@ -22,58 +22,45 @@ concurrency:
 
 jobs:
   preflight:
+    # Environment configuration is only read from the trusted main branch.
+    # Feature branches are covered by normal pull-request CI.
+    if: github.ref == 'refs/heads/main'
     name: Validate ${{ inputs.target }} environment
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: ${{ inputs.target }}
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: arima_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d arima_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
-      ARIMA_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/arima_test?sslmode=disable
-      ARIMA_TEST_RUNTIME_DATABASE_URL: postgres://arima_runtime:arima_test_password@localhost:5432/arima_test?sslmode=disable
       TARGET_ENV: ${{ inputs.target }}
-      ARIMA_OIDC_ISSUER: ${{ vars.ARIMA_OIDC_ISSUER }}
-      ARIMA_OIDC_AUDIENCE: ${{ vars.ARIMA_OIDC_AUDIENCE }}
-      ARIMA_DATABASE_URL: ${{ secrets.ARIMA_DATABASE_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout trusted main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.10'
           cache: true
-      - name: Validate environment configuration presence
+      - name: Validate planned OIDC configuration
+        if: inputs.target != 'development'
+        env:
+          ARIMA_OIDC_ISSUER: ${{ vars.ARIMA_OIDC_ISSUER }}
+          ARIMA_OIDC_AUDIENCE: ${{ vars.ARIMA_OIDC_AUDIENCE }}
         shell: bash
         run: |
           set -euo pipefail
-          case "$TARGET_ENV" in
-            development)
-              echo "Development preflight: no production credentials required."
-              ;;
-            staging|production)
-              test -n "$ARIMA_OIDC_ISSUER" || { echo "::error::Configure environment variable ARIMA_OIDC_ISSUER in GitHub Environment '$TARGET_ENV'."; exit 1; }
-              test -n "$ARIMA_OIDC_AUDIENCE" || { echo "::error::Configure environment variable ARIMA_OIDC_AUDIENCE in GitHub Environment '$TARGET_ENV'."; exit 1; }
-              test -n "$ARIMA_DATABASE_URL" || { echo "::error::Configure secret ARIMA_DATABASE_URL in GitHub Environment '$TARGET_ENV'."; exit 1; }
-              case "$ARIMA_OIDC_ISSUER" in https://*) ;; *) echo "::error::ARIMA_OIDC_ISSUER must use HTTPS."; exit 1;; esac
-              case "$ARIMA_DATABASE_URL" in postgres://*|postgresql://*) ;; *) echo "::error::ARIMA_DATABASE_URL must be a PostgreSQL DSN."; exit 1;; esac
-              echo "Required configuration is present; secret values are not printed."
-              ;;
-            *)
-              echo "::error::Unsupported target."
-              exit 1
-              ;;
+          test -n "$ARIMA_OIDC_ISSUER" || {
+            echo "::error::Configure environment variable ARIMA_OIDC_ISSUER in GitHub Environment '$TARGET_ENV'."
+            exit 1
+          }
+          test -n "$ARIMA_OIDC_AUDIENCE" || {
+            echo "::error::Configure environment variable ARIMA_OIDC_AUDIENCE in GitHub Environment '$TARGET_ENV'."
+            exit 1
+          }
+          case "$ARIMA_OIDC_ISSUER" in
+            https://*) ;;
+            *) echo "::error::ARIMA_OIDC_ISSUER must use HTTPS."; exit 1 ;;
           esac
+          echo "Planned OIDC values are present and issuer syntax is HTTPS; runtime OIDC enforcement is not implemented by this scaffold."
       - name: Check workflow syntax
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
       - name: Verify module graph is clean
@@ -96,4 +83,5 @@ jobs:
       - name: Deployment boundary
         run: |
           echo "Preflight completed. No deployment, migration, or release was performed."
+          echo "ARIMA_DATABASE_URL is not required because this scaffold does not implement persistence or migrations."
           echo "Production promotion requires an independently approved deployment target and rollout/rollback procedure."

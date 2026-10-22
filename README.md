@@ -34,29 +34,28 @@ curl -fsS http://localhost:8080/health/ready
 | `ARIMA_WRITE_TIMEOUT` | `15s` |
 | `ARIMA_IDLE_TIMEOUT` | `60s` |
 
-Timeouts use Go duration syntax and must be greater than zero and no more than five minutes. Invalid values stop startup. The application does not automatically load dotenv files. Set `ARIMA_ENV=production` in production; startup then requires complete authentication configuration.
+Timeouts use Go duration syntax and must be greater than zero and no more than five minutes. Invalid values stop startup. The application does not automatically load dotenv files. Set `ARIMA_ENV=production` in production; startup requires complete OIDC configuration and successful provider discovery.
 
-## Optional OAuth token introspection
+## OIDC JWT authentication
 
-Configure all five variables or leave all unset outside production:
+Configure both values or leave both unset outside production:
 
-- `ARIMA_OIDC_INTROSPECTION_URL`: HTTPS introspection endpoint.
-- `ARIMA_OIDC_ISSUER`: exact issuer claim.
+- `ARIMA_OIDC_ISSUER`: exact OIDC issuer URL from provider metadata.
 - `ARIMA_OIDC_AUDIENCE`: expected API audience.
-- `ARIMA_OIDC_CLIENT_ID`: introspection client ID.
-- `ARIMA_OIDC_CLIENT_SECRET`: secret-manager value only; never commit it.
 
-The identity provider must validate token signature and active/revocation status and return `active`, `iss`, `aud`, `exp`, `sub`, and `tenant_id`. When auth is unconfigured, `GET /api/v1/me` fails closed with 503. With auth configured, missing/invalid credentials return 401. See [authentication boundary](docs/security/authentication-boundary.md), [runtime runbook](docs/runbooks/runtime-configuration.md), and [environment example](configs/arima.env.example).
+The maintained `github.com/coreos/go-oidc/v3/oidc` verifier validates JWT signatures, issuer, audience, expiry and not-before against provider discovery and the provider's rotating JWKS. Unknown signing keys trigger the library's remote-key refresh behavior. Provider discovery is performed at startup with a timeout. The verified token must include non-empty `sub` and `tenant_id` claims.
+
+When authentication is unconfigured outside production, `GET /api/v1/me` fails closed with 503. Missing/invalid credentials return 401. The issuer and audience must match the actual identity provider; a configuration example is not a substitute for a provider-specific integration test. See [authentication boundary](docs/security/authentication-boundary.md), [runtime runbook](docs/runbooks/runtime-configuration.md), and [environment example](configs/arima.env.example).
 
 ## Current implementation boundary
 
-Implemented: health probes, validated HTTP runtime settings, optional token introspection, a protected identity endpoint, and a production startup gate requiring authentication. Health readiness is process-level only; it does not check external dependencies.
+Implemented: health probes, validated HTTP runtime settings, OIDC JWT verification, bearer middleware, a protected identity endpoint, and a production startup gate requiring OIDC configuration. Health readiness is process-level only; it does not check external dependencies.
 
-Not implemented: database persistence, tenant-isolation enforcement for stored records, role/policy authorization, business resource/action routes, audit persistence, idempotency storage, and transactional outbox. OpenAPI contracts for planned endpoints do not mean those routes are live. Do not expose this scaffold as production ERP functionality.
+Not implemented yet: PostgreSQL persistence, tenant-isolation enforcement for stored records, role/policy authorization, business resource/action routes, persistent audit logging, idempotency storage, and transactional outbox. OpenAPI contracts for planned endpoints do not mean those routes are live. Do not expose this scaffold as production ERP functionality.
 
 ## Layout
 - `cmd/erp-api`: executable entry point.
-- `internal/auth`: bearer middleware and token introspection.
+- `internal/auth`: bearer middleware and OIDC JWT verification.
 - `internal/config`: validated runtime configuration.
 - `internal/transport/httpapi`: health and protected identity endpoints.
 - `api/openapi`: REST contract.

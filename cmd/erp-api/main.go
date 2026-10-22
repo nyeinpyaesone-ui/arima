@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
 	"github.com/nyeinpyaesone-ui/arima/internal/config"
@@ -16,12 +18,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid runtime configuration: %v", err)
 	}
-	verifier, err := auth.NewIntrospectionVerifierFromEnv(os.Getenv)
+
+	discoveryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	verifier, err := auth.NewOIDCVerifierFromEnv(discoveryCtx, os.Getenv)
+	cancel()
 	if err != nil {
-		log.Fatalf("invalid authentication configuration: %v", err)
+		log.Fatalf("invalid OIDC authentication configuration: %v", err)
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("ARIMA_ENV")), "production") && verifier == nil {
-		log.Fatal("ARIMA_ENV=production requires complete OAuth token introspection configuration")
+		log.Fatal("ARIMA_ENV=production requires ARIMA_OIDC_ISSUER and ARIMA_OIDC_AUDIENCE")
 	}
 
 	server := &http.Server{

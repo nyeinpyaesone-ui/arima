@@ -17,15 +17,29 @@ Requirements: Go 1.23+.
 
 ```sh
 go test ./...
+go vet ./...
 go run ./cmd/erp-api
 curl -fsS http://localhost:8080/health/live
 curl -fsS http://localhost:8080/health/ready
 ```
 
-Set `ARIMA_ADDR` to change the listen address (default `:8080`).
+## Runtime configuration
+
+The executable validates these environment variables before listening:
+
+| Variable | Default |
+| --- | --- |
+| `ARIMA_ADDR` | `:8080` |
+| `ARIMA_READ_HEADER_TIMEOUT` | `5s` |
+| `ARIMA_READ_TIMEOUT` | `15s` |
+| `ARIMA_WRITE_TIMEOUT` | `15s` |
+| `ARIMA_IDLE_TIMEOUT` | `60s` |
+
+Timeout values use Go duration syntax and must be greater than zero and no more than five minutes. Invalid values stop startup rather than silently falling back. See [runtime configuration runbook](docs/runbooks/runtime-configuration.md) and [environment example](configs/arima.env.example). The application does not automatically read .env files.
 
 ## Layout
 - `cmd/erp-api`: executable entry point.
+- `internal/config`: validated runtime configuration.
 - `internal/transport/httpapi`: HTTP handlers and health endpoints.
 - `api/openapi`: REST contract.
 - `api/proto`: gRPC/Protobuf contract.
@@ -34,6 +48,6 @@ Set `ARIMA_ADDR` to change the listen address (default `:8080`).
 - `migrations`: reviewed database migration home.
 - `.github/workflows/ci.yml`: formatting, tests, vet and build.
 
-The initial service intentionally exposes only health endpoints. Business-resource and action endpoints are contract-first, not yet implemented. Do not treat this scaffold as production-ready ERP functionality.
+The initial service intentionally exposes only health endpoints. Business-resource and action endpoints are contract-first, not yet implemented. Health readiness currently checks process-level behavior only; it does not validate external dependencies. Do not treat this scaffold as production-ready ERP functionality.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).

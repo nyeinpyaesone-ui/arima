@@ -17,7 +17,7 @@ func (f authorizerFunc) Authorize(ctx context.Context, p Principal, permission s
 func TestRequirePermissionFailsClosedWithoutAuthorizerOrPrincipal(t *testing.T) {
 	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("next must not be called") })
 	cases := []struct {
-		name      string
+		name       string
 		authorizer Authorizer
 		handler   http.Handler
 		want      int

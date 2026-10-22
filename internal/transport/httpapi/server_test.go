@@ -1,11 +1,23 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/nyeinpyaesone-ui/arima/internal/auth"
 )
+
+type testVerifier struct{}
+
+func (testVerifier) Verify(_ context.Context, token string) (auth.Principal, error) {
+	if token != "valid-test-token" {
+		return auth.Principal{}, auth.ErrInvalidToken
+	}
+	return auth.Principal{Subject: "user-42", TenantID: "tenant-7"}, nil
+}
 
 func TestHealthEndpoints(t *testing.T) {
 	handler := New()
@@ -25,6 +37,48 @@ func TestHealthEndpoints(t *testing.T) {
 			}
 			if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 				t.Fatal("security header missing")
+			}
+		})
+	}
+}
+
+func TestProtectedIdentityRouteFailsClosedWithoutVerifier(t *testing.T) {
+	rec := httptest.NewRecorder()
+	New().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/me", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestProtectedIdentityRouteRequiresValidBearer(t *testing.T) {
+	handler := NewWithVerifier(testVerifier{})
+	for _, tc := range []struct {
+		name string
+		header string
+		want int
+	}{
+		{name: "missing token", want: http.StatusUnauthorized},
+		{name: "invalid token", header: "Bearer invalid", want: http.StatusUnauthorized},
+		{name: "valid token", header: "Bearer valid-test-token", want: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
+			}
+			if tc.want == http.StatusOK {
+				var body identityResponse
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if body.Subject != "user-42" || body.TenantID != "tenant-7" {
+					t.Fatalf("unexpected identity response: %#v", body)
+				}
 			}
 		})
 	}

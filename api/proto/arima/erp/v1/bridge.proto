@@ -1,0 +1,86 @@
+syntax = "proto3";
+package arima.erp.v1;
+option go_package = "github.com/nyeinpyaesone-ui/arima/gen/go/arima/erp/v1;erpv1";
+
+service ERPBridge {
+  rpc GetResource(GetResourceRequest) returns (Resource);
+  rpc SearchResources(SearchResourcesRequest) returns (SearchResourcesResponse);
+  rpc ValidateAction(ValidateActionRequest) returns (ActionValidation);
+  rpc ProposeAction(ProposeActionRequest) returns (Action);
+  rpc GetAction(GetActionRequest) returns (Action);
+  rpc ApproveAction(ApproveActionRequest) returns (Action);
+  rpc ExecuteAction(ExecuteActionRequest) returns (Action);
+}
+enum ResourceType {
+  RESOURCE_TYPE_UNSPECIFIED = 0;
+  RESOURCE_TYPE_CUSTOMER = 1;
+  RESOURCE_TYPE_PRODUCT = 2;
+  RESOURCE_TYPE_INVENTORY = 3;
+  RESOURCE_TYPE_SALES_ORDER = 4;
+  RESOURCE_TYPE_PURCHASE_ORDER = 5;
+}
+enum ActionStatus {
+  ACTION_STATUS_UNSPECIFIED = 0;
+  ACTION_STATUS_PROPOSED = 1;
+  ACTION_STATUS_REQUIRES_APPROVAL = 2;
+  ACTION_STATUS_APPROVED = 3;
+  ACTION_STATUS_EXECUTING = 4;
+  ACTION_STATUS_SUCCEEDED = 5;
+  ACTION_STATUS_REJECTED = 6;
+  ACTION_STATUS_FAILED = 7;
+}
+message Resource {
+  string id = 1;
+  ResourceType type = 2;
+  string tenant_id = 3;
+  string version = 4;
+  string data_json = 5;
+  string updated_at = 6;
+}
+message GetResourceRequest {
+  ResourceType type = 1;
+  string id = 2;
+  string expected_tenant_id = 3; // Must match authenticated identity; not trusted alone.
+}
+message SearchResourcesRequest {
+  ResourceType type = 1;
+  string filter_json = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+message SearchResourcesResponse { repeated Resource items = 1; string next_page_token = 2; }
+message ActionInput {
+  string action_type = 1;
+  string resource_type = 2;
+  string resource_id = 3;
+  string expected_version = 4;
+  string payload_json = 5;
+  string idempotency_key = 6;
+  string rationale = 7;
+}
+message ValidateActionRequest { ActionInput input = 1; }
+message ActionValidation {
+  bool valid = 1;
+  repeated string errors = 2;
+  repeated string warnings = 3;
+  bool approval_required = 4;
+}
+message ProposeActionRequest { ActionInput input = 1; }
+message GetActionRequest { string action_id = 1; }
+message ApproveActionRequest {
+  string action_id = 1;
+  string decision = 2; // APPROVE or REJECT
+  string reason = 3;
+}
+message ExecuteActionRequest { string action_id = 1; }
+message Action {
+  string id = 1;
+  string tenant_id = 2;
+  ActionStatus status = 3;
+  string action_type = 4;
+  string resource_type = 5;
+  string resource_id = 6;
+  string created_at = 7;
+  string updated_at = 8;
+  string result_json = 9;
+}

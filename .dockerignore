@@ -1,0 +1,8 @@
+.git
+.github
+bin
+coverage.out
+*.log
+.env
+.env.*
+!*.env.example

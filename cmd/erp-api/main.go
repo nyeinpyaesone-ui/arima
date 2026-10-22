@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/nyeinpyaesone-ui/arima/internal/auth"
 	"github.com/nyeinpyaesone-ui/arima/internal/config"
 	"github.com/nyeinpyaesone-ui/arima/internal/transport/httpapi"
 )
@@ -14,10 +15,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid runtime configuration: %v", err)
 	}
+	verifier, err := auth.NewIntrospectionVerifierFromEnv(os.Getenv)
+	if err != nil {
+		log.Fatalf("invalid authentication configuration: %v", err)
+	}
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.New(),
+		Handler:           httpapi.NewWithVerifier(verifier),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,

@@ -51,7 +51,27 @@ jobs:
           fi
       - name: Vet
         run: go vet ./...
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
       - name: Tests
         run: go test -race -coverprofile=coverage.out ./...
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [[ -f coverage.out ]]; then
+            go tool cover -func=coverage.out | tee coverage-summary.txt
+          else
+            echo "Coverage profile was not produced." | tee coverage-summary.txt
+          fi
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence
+          path: |
+            coverage.out
+            coverage-summary.txt
+          if-no-files-found: warn
+          retention-days: 14
       - name: Build
-        run: CGO_ENABLED=0 go build -trimpath ./cmd/erp-api
+        run: CGO_ENABLED=0 go build -trimpath -o /tmp/arima-api ./cmd/erp-api

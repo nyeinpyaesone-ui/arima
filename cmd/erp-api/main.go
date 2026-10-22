@@ -47,6 +47,14 @@ func main() {
 		}
 		dbCloser = db
 		dbPing = db.PingContext
+		if production {
+			schemaCtx, schemaCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := store.VerifySchema(schemaCtx, db)
+			schemaCancel()
+			if err != nil {
+				log.Fatalf("PostgreSQL schema verification failed: %v", err)
+			}
+		}
 	}
 	if dbCloser != nil {
 		defer dbCloser.Close()

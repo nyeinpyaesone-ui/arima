@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -61,7 +62,8 @@ func (p *Postgres) WithinTenant(ctx context.Context, tenantID string, fn func(*T
 	if p == nil || p.db == nil {
 		return errors.New("database store is not initialized")
 	}
-	if strings.TrimSpace(tenantID) == "" {
+	tenantID = strings.ToLower(strings.TrimSpace(tenantID))
+	if !validUUID(tenantID) {
 		return ErrInvalidTenant
 	}
 	if fn == nil {
@@ -139,8 +141,10 @@ func (t *TenantTx) AppendAudit(ctx context.Context, actor, action, resourceType,
 	if strings.TrimSpace(actor) == "" || strings.TrimSpace(action) == "" || strings.TrimSpace(correlationID) == "" {
 		return errors.New("audit actor, action, and correlation ID are required")
 	}
-	if !validObject(details) {
+	if len(details) == 0 {
 		details = json.RawMessage(`{}`)
+	} else if !validObject(details) {
+		return errors.New("audit details must be a valid JSON object")
 	}
 	_, err := t.tx.ExecContext(ctx, `
 INSERT INTO audit_events (tenant_id, actor_subject, action, resource_type, resource_id, outcome, correlation_id, details)
@@ -240,4 +244,16 @@ func validObject(raw json.RawMessage) bool {
 
 func validJSON(raw json.RawMessage) bool {
 	return len(raw) > 0 && json.Valid(raw)
+}
+
+func validUUID(value string) bool {
+	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
+		return false
+	}
+	compact := strings.ReplaceAll(value, "-", "")
+	if len(compact) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(compact)
+	return err == nil
 }

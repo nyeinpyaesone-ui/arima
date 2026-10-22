@@ -19,8 +19,8 @@ func TestRequirePermissionFailsClosedWithoutAuthorizerOrPrincipal(t *testing.T) 
 	cases := []struct {
 		name       string
 		authorizer Authorizer
-		handler   http.Handler
-		want      int
+		handler    http.Handler
+		want       int
 	}{
 		{name: "no authorizer", authorizer: nil, handler: next, want: http.StatusServiceUnavailable},
 		{name: "no authenticated principal", authorizer: authorizerFunc(func(context.Context, Principal, string) error { return nil }), handler: next, want: http.StatusUnauthorized},

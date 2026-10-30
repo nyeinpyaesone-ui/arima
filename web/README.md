@@ -43,7 +43,7 @@ npm run build
 npm run preview
 ```
 
-The production output is written to `web/dist`. The deployment layer must serve these static assets and route `/health/*` to the Go API on the same origin (or provide an equivalent reverse-proxy configuration). No production hosting or authentication integration is configured by this foundation.
+The production output is written to `web/dist`. The deployment layer must serve these static assets and route `/health/*` to the Go API on the same origin (or provide an equivalent reverse-proxy configuration). No production hosting or authentication integration is configured by this foundation. For an Nginx-based same-origin setup, see [deploy/README.md](deploy/README.md) and the upstream-configurable template in `deploy/nginx.conf.template`.
 
 ## Design tokens
 

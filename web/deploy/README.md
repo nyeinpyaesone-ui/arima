@@ -7,6 +7,7 @@ This frontend is a static SPA. The included Nginx template serves the built Vite
 - Build the frontend with Node.js 22+ from `web/`.
 - Publish the contents of `web/dist/` as the Nginx document root (`/usr/share/nginx/html` in the example).
 - Set `ARIMA_API_UPSTREAM` to the private origin of the Go API, for example `http://arima-api:8080`. It must be reachable from the Nginx runtime and must not include a path suffix.
+- Set `ARIMA_WEB_ROOT` to the absolute filesystem path containing the built static files, for example `/usr/share/nginx/html`.
 - Keep the API on a private service network. Expose the web entry point through the platform ingress and terminate TLS there.
 
 ## Render and validate the Nginx configuration
@@ -19,13 +20,14 @@ case "$ARIMA_API_UPSTREAM" in
   http://*|https://*) ;;
   *) echo "ARIMA_API_UPSTREAM must be an http(s) origin" >&2; exit 1 ;;
 esac
-envsubst '${ARIMA_API_UPSTREAM}' \
+ : "${ARIMA_WEB_ROOT:?Set the absolute static document root}"
+envsubst '${ARIMA_API_UPSTREAM} ${ARIMA_WEB_ROOT}' \
   < web/deploy/nginx.conf.template \
   > /etc/nginx/conf.d/default.conf
 nginx -t
 ```
 
-Copy the built `web/dist/` directory into the configured Nginx document root before starting Nginx.
+Copy the built `web/dist/` directory into the configured Nginx document root before starting Nginx. The smoke test at `web/deploy/smoke-test.sh` exercises the built app through Nginx and the Go API on one origin.
 
 ## Route contract
 

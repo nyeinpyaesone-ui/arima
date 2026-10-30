@@ -40,6 +40,8 @@ pid $tmp_dir/nginx.pid;
 error_log stderr;
 events {}
 http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
     access_log off;
     include $tmp_dir/default.conf;
 }
@@ -68,6 +70,10 @@ done
 
 curl --fail --silent http://127.0.0.1:8080/ > "$tmp_dir/index.html"
 grep -q "ARIMA — Precision Operations" "$tmp_dir/index.html"
+curl --fail --silent --head http://127.0.0.1:8080/ \
+  | grep -qi '^Content-Type: text/html'
+curl --fail --silent http://127.0.0.1:8080/overview \
+  | grep -q "ARIMA — Precision Operations"
 
 curl --fail --silent http://127.0.0.1:8080/health/live \
   | grep -q '"status":"live"'

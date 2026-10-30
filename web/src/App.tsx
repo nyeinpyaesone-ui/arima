@@ -6,7 +6,7 @@ type ProbeState = "checking" | "healthy" | "unavailable" | "unknown";
 type Probe = {
   name: ProbeName;
   state: ProbeState;
-   detail?: string;
+  detail?: string;
 };
 
 const initialProbes: Probe[] = [

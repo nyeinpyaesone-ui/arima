@@ -20,7 +20,7 @@ case "$ARIMA_API_UPSTREAM" in
   http://*|https://*) ;;
   *) echo "ARIMA_API_UPSTREAM must be an http(s) origin" >&2; exit 1 ;;
 esac
- : "${ARIMA_WEB_ROOT:?Set the absolute static document root}"
+: "${ARIMA_WEB_ROOT:?Set the absolute static document root}"
 envsubst '${ARIMA_API_UPSTREAM} ${ARIMA_WEB_ROOT}' \
   < web/deploy/nginx.conf.template \
   > /etc/nginx/conf.d/default.conf

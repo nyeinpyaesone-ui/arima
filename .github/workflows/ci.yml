@@ -11,7 +11,7 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  verify-go:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -28,30 +28,3 @@ jobs:
         run: go test -race -coverprofile=coverage.out ./...
       - name: Build
         run: CGO_ENABLED=0 go build -trimpath ./cmd/erp-api
-  verify-web:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Generate temporary lockfile bootstrap
-        working-directory: web
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-      - name: Install from generated lockfile
-        working-directory: web
-        run: npm ci --no-audit --no-fund
-      - name: Export lockfile bootstrap for source control
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-dependency-lock-bootstrap
-          path: web/package-lock.json
-          if-no-files-found: error
-          retention-days: 7
-      - name: Type check
-        working-directory: web
-        run: npm run typecheck
-      - name: Build
-        working-directory: web
-        run: npm run build

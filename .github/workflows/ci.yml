@@ -36,10 +36,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install dependencies
+      - name: Generate temporary lockfile bootstrap
         working-directory: web
-        run: npm install --no-audit --no-fund
-      - name: Export generated dependency lock (temporary bootstrap)
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Install from generated lockfile
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Export lockfile bootstrap for source control
         uses: actions/upload-artifact@v4
         with:
           name: web-dependency-lock-bootstrap

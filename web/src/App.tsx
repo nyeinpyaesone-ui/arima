@@ -55,26 +55,26 @@ function App() {
     try {
       const results = await Promise.all(
         (["live", "ready"] as const).map(async (name): Promise<Probe> => {
-        try {
-          const response = await fetch(`/health/${name}`, {
-            headers: { Accept: "application/json" },
-            cache: "no-store"
-          });
-          if (!response.ok) {
-            return { name, state: "unavailable", detail: `HTTP ${response.status}` };
+          try {
+            const response = await fetch(`/health/${name}`, {
+              headers: { Accept: "application/json" },
+              cache: "no-store"
+            });
+            if (!response.ok) {
+              return { name, state: "unavailable", detail: `HTTP ${response.status}` };
+            }
+            const body: unknown = await response.json();
+            if (
+              !body || typeof body !== "object" ||
+              !("status" in body) || body.status !== name ||
+              !("service" in body) || body.service !== "arima-erp-api"
+            ) {
+              return { name, state: "unavailable", detail: "Unexpected health response" };
+            }
+            return { name, state: "healthy", detail: "Endpoint returned the expected health response" };
+          } catch {
+            return { name, state: "unavailable", detail: "Could not reach the API" };
           }
-          const body: unknown = await response.json();
-          if (
-            !body || typeof body !== "object" ||
-            !("status" in body) || body.status !== name ||
-            !("service" in body) || body.service !== "arima-erp-api"
-          ) {
-            return { name, state: "unavailable", detail: "Unexpected health response" };
-          }
-          return { name, state: "healthy", detail: "Endpoint returned the expected health response" };
-        } catch {
-          return { name, state: "unavailable", detail: "Could not reach the API" };
-        }
         })
       );
       setProbes(results);

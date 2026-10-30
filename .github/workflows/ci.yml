@@ -48,7 +48,7 @@ jobs:
           name: web-dependency-lock-bootstrap
           path: web/package-lock.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
       - name: Type check
         working-directory: web
         run: npm run typecheck

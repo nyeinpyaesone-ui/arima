@@ -1,7 +1,7 @@
 server {
     listen 8080;
     server_name _;
-    root /usr/share/nginx/html;
+    root ${ARIMA_WEB_ROOT};
     index index.html;
     server_tokens off;
 

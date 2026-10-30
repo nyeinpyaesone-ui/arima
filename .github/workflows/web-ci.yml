@@ -44,3 +44,18 @@ jobs:
       - name: Build
         working-directory: web
         run: npm run build
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Build Go API for integration test
+        run: CGO_ENABLED=0 go build -trimpath -o /tmp/arima-api ./cmd/erp-api
+      - name: Install Nginx and envsubst
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes nginx gettext-base
+      - name: Verify static hosting and same-origin API proxy
+        env:
+          ARIMA_API_BINARY: /tmp/arima-api
+          WEB_DIST_DIR: ${{ github.workspace }}/web/dist
+        run: bash web/deploy/smoke-test.sh

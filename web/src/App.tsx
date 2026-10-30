@@ -6,8 +6,7 @@ type ProbeState = "checking" | "healthy" | "unavailable" | "unknown";
 type Probe = {
   name: ProbeName;
   state: ProbeState;
-  checkedAt?: string;
-  detail?: string;
+   detail?: string;
 };
 
 const initialProbes: Probe[] = [
@@ -48,31 +47,41 @@ function stateLabel(state: ProbeState): string {
 function App() {
   const [probes, setProbes] = useState<Probe[]>(initialProbes);
   const [lastChecked, setLastChecked] = useState<string | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
 
   const checkHealth = useCallback(async () => {
+    setIsChecking(true);
     setProbes((current) => current.map((probe) => ({ ...probe, state: "checking", detail: undefined })));
-    const results = await Promise.all(
-      (["live", "ready"] as const).map(async (name): Promise<Probe> => {
+    try {
+      const results = await Promise.all(
+        (["live", "ready"] as const).map(async (name): Promise<Probe> => {
         try {
           const response = await fetch(`/health/${name}`, {
             headers: { Accept: "application/json" },
             cache: "no-store"
           });
           if (!response.ok) {
-            return { name, state: "unavailable", detail: `HTTP ${response.status}`, checkedAt: new Date().toISOString() };
+            return { name, state: "unavailable", detail: `HTTP ${response.status}` };
           }
           const body: unknown = await response.json();
-          if (!body || typeof body !== "object" || !("status" in body)) {
-            return { name, state: "unavailable", detail: "Unexpected health response", checkedAt: new Date().toISOString() };
+          if (
+            !body || typeof body !== "object" ||
+            !("status" in body) || body.status !== name ||
+            !("service" in body) || body.service !== "arima-erp-api"
+          ) {
+            return { name, state: "unavailable", detail: "Unexpected health response" };
           }
-          return { name, state: "healthy", detail: "Endpoint returned HTTP 200", checkedAt: new Date().toISOString() };
+          return { name, state: "healthy", detail: "Endpoint returned the expected health response" };
         } catch {
-          return { name, state: "unavailable", detail: "Could not reach the API", checkedAt: new Date().toISOString() };
+          return { name, state: "unavailable", detail: "Could not reach the API" };
         }
-      })
-    );
-    setProbes(results);
-    setLastChecked(new Date().toISOString());
+        })
+      );
+      setProbes(results);
+      setLastChecked(new Date().toISOString());
+    } finally {
+      setIsChecking(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -140,11 +149,11 @@ function App() {
         <section className="content-section" id="health">
           <div className="section-heading">
             <div><div className="eyebrow">RUNTIME</div><h2>API health</h2></div>
-            <button className="refresh-button" type="button" onClick={() => void checkHealth()}>
-              <span aria-hidden="true">↻</span> Check again
+            <button className="refresh-button" type="button" onClick={() => void checkHealth()} disabled={isChecking}>
+              <span aria-hidden="true">↻</span> {isChecking ? "Checking…" : "Check again"}
             </button>
           </div>
-          <div className="health-panel">
+          <div className="health-panel" aria-live="polite" aria-busy={isChecking}>
             {probes.map((probe) => (
               <div className="health-row" key={probe.name}>
                 <div className="health-name">

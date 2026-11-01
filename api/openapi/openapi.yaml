@@ -4,7 +4,8 @@ info:
   version: 0.1.0
   description: >
     Contract-first tenant-scoped ERP and AI integration boundary.
-    Only health routes are implemented by the initial executable.
+    Implemented routes are health probes and GET /api/v1/me. Other resource/action
+    routes below remain planned contracts and are not implemented by the executable.
 servers:
   - url: /
 security:
@@ -26,17 +27,36 @@ paths:
       operationId: readiness
       security: []
       summary: Readiness probe
-      description: Scaffold-only response until dependency checks are wired.
+      description: Process-only response; dependency checks are not implemented.
       responses:
         '200':
           description: Process currently accepts requests
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Health' }
+  /api/v1/me:
+    get:
+      operationId: currentIdentity
+      summary: Return the authenticated subject and tenant
+      description: Requires configured OAuth token introspection. Returns 503 when authentication is not configured.
+      responses:
+        '200':
+          description: Verified caller identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subject, tenant_id]
+                properties:
+                  subject: { type: string }
+                  tenant_id: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503':
+          description: Authentication verifier is not configured
   /v1/resources/{type}/{id}:
     get:
       operationId: getResource
-      summary: Read tenant-scoped ERP resource
+      summary: Planned tenant-scoped ERP resource read; not implemented
       parameters:
         - in: path
           name: type
@@ -58,7 +78,7 @@ paths:
   /v1/actions:validate:
     post:
       operationId: validateAction
-      summary: Validate an action without mutation
+      summary: Planned action validation without mutation; not implemented
       requestBody:
         required: true
         content:
@@ -75,7 +95,7 @@ paths:
   /v1/actions:
     post:
       operationId: proposeAction
-      summary: Propose an auditable action; does not execute it
+      summary: Planned auditable action proposal; not implemented
       parameters:
         - in: header
           name: Idempotency-Key
@@ -96,7 +116,7 @@ paths:
   /v1/actions/{id}:
     get:
       operationId: getAction
-      summary: Read action status
+      summary: Planned action status read; not implemented
       parameters:
         - in: path
           name: id
@@ -112,7 +132,7 @@ paths:
   /v1/actions/{id}:approve:
     post:
       operationId: approveAction
-      summary: Approve or reject using an authorized principal
+      summary: Planned approval route; not implemented
       parameters:
         - in: path
           name: id
@@ -139,7 +159,7 @@ paths:
   /v1/actions/{id}:execute:
     post:
       operationId: executeAction
-      summary: Execute an approved action with idempotency and version checks
+      summary: Planned approved-action execution; not implemented
       parameters:
         - in: path
           name: id
@@ -158,7 +178,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
+      bearerFormat: OAuth2 access token
   responses:
     Unauthorized: { description: Missing or invalid authentication }
     Forbidden: { description: Principal lacks tenant-scoped permission }

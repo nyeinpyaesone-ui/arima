@@ -69,7 +69,7 @@ WHERE table_schema = 'public'
 	return nil
 }
 
- 
+
 // VerifyOutboxWorkerSchema checks only the objects required by the restricted
 // worker identity. It intentionally does not require access to business or
 // tenant-authorization tables.

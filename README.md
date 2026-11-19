@@ -15,15 +15,18 @@ The system is not yet production-ready. A real OIDC provider, tenant provisionin
 
 ## Quick start
 
-Requirements: Go 1.26.11 and PostgreSQL 15+ for persistence.
+Requirements: Go 1.26.11, Docker Engine and the Docker Compose plugin. PostgreSQL 15+ is started locally by Compose.
 
 ```sh
-go mod download
-go mod verify
-go test ./...
-go vet ./...
-go run ./cmd/erp-api
+cp configs/arima.env.example .env
+make dev-up
+curl --fail --silent --show-error http://127.0.0.1:8080/health/live
+curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
 ```
+
+Compose starts PostgreSQL, applies migrations 0001–0003 once using a migration ledger, provisions separate local-only API/worker database roles, and starts the API. The database volume persists after `make dev-down`. Do not run `docker compose down -v` unless you intend to delete the local database.
+
+For local Go checks, run `go mod download`, `go mod verify`, `make check`, and `go run ./cmd/erp-api`. Without a configured OIDC provider, customer routes remain inaccessible (fail closed). Provision a real development tenant membership for the exact OIDC subject before testing customer access.
 
 Without OIDC configuration, protected routes fail closed with HTTP 503; health endpoints remain available. For customer API operations, apply migrations 0001, 0002 and 0003 to a disposable development database, configure ARIMA_DATABASE_URL, and provision a tenant membership with the operator runbook.
 
@@ -65,7 +68,7 @@ Provision roles, permissions and membership through the trusted operator process
 
 ## Outbox worker
 
-The same container image includes /erp-api and /outbox-worker. The worker process is started by overriding the container command to /outbox-worker. It exposes internal liveness/readiness endpoints on port 8081; readiness checks the worker database connection only, not webhook delivery.
+The same container image includes /erp-api and /outbox-worker. Start the worker as a separate process by overriding the image **entrypoint** to `/outbox-worker` (not merely its command). The optional local Compose overlay is `compose.worker.yaml`. It exposes internal liveness/readiness endpoints on port 8081; readiness checks the worker database connection only, not webhook delivery.
 
 Required worker environment:
 

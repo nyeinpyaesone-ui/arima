@@ -2,81 +2,93 @@
 
 ## Scope
 
-This runbook covers HTTP listener/timeouts and OIDC JWT validation. The API has fail-closed OIDC startup, PostgreSQL connectivity/schema checks, tenant-scoped repository primitives, forced RLS, audit/idempotency/outbox transaction primitives, and a leased outbox worker package. The worker supports tenant-scoped claim, delivery outside the SQL transaction, owner-checked acknowledgement, lease recovery, bounded exponential retry and dead-letter transition. The worker is not wired into cmd/erp-api: a concrete publisher/handler and trusted tenant scheduler must be supplied. No production business mutation routes or complete end-to-end business workflows are exposed yet.
+ARIMA has an API process, a separate outbox worker process, PostgreSQL-backed tenant data, OIDC authentication, and forced tenant RLS. The API verifies required schema before production startup. Customer create/read routes enforce tenant permissions inside database transactions. The worker uses a distinct database identity, bounded tenant scanning, event leases, delivery timeouts and an HTTPS webhook receiver.
 
-## Supported variables
+The application does not run schema migrations at startup. It is not a complete ERP: inventory, sales, purchasing, accounting, payments, branches, reporting and approval workflows remain outside the implemented scope.
+
+## Local development
+
+Use the repository's Compose setup rather than putting local credentials into tracked files:
+
+```sh
+cp configs/arima.env.example .env
+# Edit .env only when you need a real local OIDC provider or webhook receiver.
+make dev-up
+docker compose logs -f api
+```
+
+The default API is available at `http://127.0.0.1:8080`. PostgreSQL is exposed only on the local loopback interface at port 5432. Compose runs reviewed migrations 0001, 0002 and 0003 through a one-shot migration service, records applied migration versions, and grants separate local-only API and worker roles. The persistent database volume survives `make dev-down`; do not use `docker compose down -v` unless you intentionally want to delete local data.
+
+Without OIDC configuration, protected endpoints fail closed. To exercise customer routes, configure a real development OIDC issuer/audience and provision the exact token subject and tenant membership using the trusted operator procedure. Do not invent a tenant claim or accept a subject/role from the request body.
+
+To start the worker, first set `ARIMA_OUTBOX_WEBHOOK_URL` to an HTTPS receiver that durably accepts events and deduplicates by event ID, and set `ARIMA_OUTBOX_WEBHOOK_TOKEN` in the ignored local `.env`. Then run:
+
+```sh
+make dev-worker
+curl --fail --silent --show-error http://127.0.0.1:8081/health/ready
+```
+
+The worker endpoint checks process/database readiness, not end-to-end webhook delivery. Do not start it with an unconfigured or placeholder receiver.
+
+## Supported API variables
 
 | Variable | Default | Validation |
 | --- | --- | --- |
-| `ARIMA_ENV` | development | `production` requires OIDC configuration and successful discovery |
-| `ARIMA_ADDR` | `:8080` | Must be `host:port` or `:port`; port 1–65535 |
-| `ARIMA_READ_HEADER_TIMEOUT` | `5s` | Go duration greater than 0 and no more than 5m |
-| `ARIMA_READ_TIMEOUT` | `15s` | Go duration greater than 0 and no more than 5m |
-| `ARIMA_WRITE_TIMEOUT` | `15s` | Go duration greater than 0 and no more than 5m |
-| `ARIMA_IDLE_TIMEOUT` | `60s` | Go duration greater than 0 and no more than 5m |
-| `ARIMA_OIDC_ISSUER` | unset | Exact issuer URL from provider metadata |
-| `ARIMA_OIDC_AUDIENCE` | unset | Expected API audience |
-| `ARIMA_DATABASE_URL` | unset | PostgreSQL DSN; required in production |
+| `ARIMA_ENV` | development | production requires OIDC and PostgreSQL |
+| `ARIMA_ADDR` | `:8080` | host:port or :port; port 1–65535 |
+| `ARIMA_READ_HEADER_TIMEOUT` | `5s` | positive Go duration, max 5m |
+| `ARIMA_READ_TIMEOUT` | `15s` | positive Go duration, max 5m |
+| `ARIMA_WRITE_TIMEOUT` | `15s` | positive Go duration, max 5m |
+| `ARIMA_IDLE_TIMEOUT` | `60s` | positive Go duration, max 5m |
+| `ARIMA_OIDC_ISSUER` | unset | exact HTTPS issuer from provider metadata |
+| `ARIMA_OIDC_AUDIENCE` | unset | expected API audience |
+| `ARIMA_DATABASE_URL` | unset | PostgreSQL URL; required in production, `sslmode=verify-full` |
 
 Configure both OIDC variables or neither outside production. Production startup fails if either is absent or provider discovery fails. Discovery is attempted with a 10-second startup timeout.
 
-## JWT validation boundary
+## Worker variables
 
-ARIMA uses the maintained `github.com/coreos/go-oidc/v3/oidc` verifier. The provider's discovery metadata supplies the issuer and JWKS URI. The verifier checks JWT signature, exact issuer, configured audience, expiration and not-before; its remote key set supports signing-key rotation. The verified token must contain non-empty `sub` and `tenant_id` claims.
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `ARIMA_OUTBOX_DATABASE_URL` | yes | Dedicated worker database identity; production requires `sslmode=verify-full` |
+| `ARIMA_OUTBOX_WEBHOOK_URL` | yes | Absolute HTTPS receiver URL without user info or fragment |
+| `ARIMA_OUTBOX_WEBHOOK_TOKEN` | yes | Bearer credential for the receiver; store in a secret manager |
+| `ARIMA_OUTBOX_HEALTH_ADDR` | no | Health listener; default `:8081` |
 
-Use an access token intended for the ARIMA API, not an ID token issued to an unrelated client. Confirm with the identity-provider documentation which claims appear in access tokens. No real provider has yet been configured or tested in this repository; production rollout remains blocked until integration tests cover invalid signature, wrong issuer/audience, expiry, not-before, unknown/rotated key, missing tenant claim, provider outage and token revocation semantics.
+The worker process is `/outbox-worker`; the API process is `/erp-api`. They use separate database credentials and process health endpoints. The webhook must authenticate the bearer token, durably accept the event, deduplicate using `Idempotency-Key` and `X-ARIMA-Event-ID`, and return 2xx only after durable acceptance. Delivery is at-least-once. HTTP 429/5xx responses are retried; permanent rejections are dead-lettered. Never log tokens or full customer/event payloads.
 
-## Configure and run locally
+## OIDC and authorization
 
-```sh
-export ARIMA_ENV=development
-export ARIMA_ADDR='127.0.0.1:8080'
-export ARIMA_READ_HEADER_TIMEOUT='5s'
-export ARIMA_READ_TIMEOUT='15s'
-export ARIMA_WRITE_TIMEOUT='15s'
-export ARIMA_IDLE_TIMEOUT='60s'
+ARIMA uses the maintained `github.com/coreos/go-oidc/v3/oidc` verifier. Provider discovery supplies issuer metadata and JWKS. The verifier checks JWT signature, exact issuer, audience, expiry and not-before; the remote key set supports signing-key rotation. The access token must contain non-empty `sub` and `tenant_id` claims.
 
-go test ./...
-go vet ./...
-test -z "$(gofmt -l ./cmd ./internal)"
-go run ./cmd/erp-api
-```
+Authorization is database-backed. The verified subject and tenant are used to check active membership and tenant-local permissions; client-supplied role names and permission lists are not trusted. Customer writes require `customer.write`, reads require `customer.read`. Provision role/membership rows through [tenant access provisioning](tenant-access-provisioning.md), never through public request input.
 
-In another terminal:
+No real identity provider has been configured in this repository. Before production, test the selected provider's invalid signature, wrong issuer/audience, expiry, not-before, unknown/rotated key, missing tenant claim, outage and revocation behavior.
 
-```sh
-curl --fail --silent --show-error http://127.0.0.1:8080/health/live
-curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
-curl -i http://127.0.0.1:8080/api/v1/me
-```
+## PostgreSQL roles and migrations
 
-Health endpoints report process-level status only. Without OIDC configuration, the protected identity route returns 503. With a verifier configured, missing/invalid bearer credentials return 401.
+Apply migrations 0001, 0002 and 0003 in order with a dedicated migration identity. The API never applies DDL during startup.
 
-## PostgreSQL setup and migration
+The API runtime identity must be `NOSUPERUSER NOBYPASSRLS` and receive only:
+- SELECT/INSERT/UPDATE on `tenant_records` and `idempotency_keys`.
+- INSERT on `audit_events`.
+- SELECT/INSERT on `outbox_events`.
+- SELECT on `tenant_roles`, `tenant_role_permissions` and `tenant_memberships`.
 
-The service requires `ARIMA_DATABASE_URL` in production and pings PostgreSQL before binding. The `/health/ready` endpoint returns 503 when the configured database ping fails. Use a dedicated migration identity to apply reviewed migrations; the application deliberately does not mutate schema at startup.
+The worker identity must be `NOSUPERUSER NOBYPASSRLS) and receive only SELECT on `tenants`, plus SELECT/UPDATE on `outbox_events`. It must not read business records or tenant membership tables. The Compose role-grant script is strictly for local development and must not be used as a production provisioning mechanism.
 
-```sh
-export ARIMA_DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require'
-psql "$ARIMA_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0001_tenant_foundation.up.sql
-```
+Production PostgreSQL URLs must use TLS certificate and hostname verification (`sslmode=verify-full`). Do not use `sslmode=disable` or `require` for production. Store migration, API and worker credentials separately in the deployment platform's secret manager. Verify effective grants and forced RLS against the actual staging database before exposing the service.
 
-Supply credentials through a secret manager, not shell history or committed files. Test migrations and rollback on a disposable PostgreSQL 15 database first. The down migration deletes tenant records, audit history, idempotency state and outbox events; use only after an approved backup and explicit data-loss approval. CI provisions a separate `arima_test` PostgreSQL database and runs the tenant-isolation integration test against it.
+## Production deployment rules
 
-The repository's tenant transaction API sets `app.tenant_id` transaction-locally from the verified principal and the migration forces RLS on tenant-scoped tables. Do not issue queries outside `Postgres.WithinTenant` for tenant data. Ensure the application DB role is least-privileged and cannot bypass RLS; never grant `BYPASSRLS` or superuser to the runtime role. RLS is defense in depth, not a replacement for role/policy authorization.
-
-## Deployment rules
-
-1. Set `ARIMA_ENV=production`; startup requires OIDC issuer/audience, reachable provider discovery, and a working `ARIMA_DATABASE_URL`.
-2. Set `ARIMA_OIDC_ISSUER` and `ARIMA_OIDC_AUDIENCE` from the identity provider's authoritative configuration. Never guess either value.
-3. Keep the service behind a trusted TLS ingress and private network until authorization, tenant-scoped persistence and operational controls are implemented.
-4. Change timeouts only from observed request-duration and traffic data; defaults are not measured production SLOs.
-5. Treat invalid configuration or failed discovery as deployment failure; do not silently fall back.
-6. The application does not automatically load dotenv files.
+1. Set `ARIMA_ENV=production`; API startup requires OIDC issuer/audience, successful provider discovery, a reachable PostgreSQL server and the complete reviewed schema.
+2. Configure the API and worker with separate database identities. Do not reuse the migration role.
+3. Configure webhook receiver credentials through the worker secret store; do not put webhook secrets into the API container.
+4. Keep API and worker behind trusted network boundaries. Expose only the necessary API ingress; keep worker health endpoints internal.
+5. Set timeouts from observed request/receiver duration and measured service objectives; the defaults are safe starting points, not measured production SLOs.
+6. Treat invalid configuration, failed discovery, incomplete migrations, failed readiness or missing worker receiver as a failed rollout.
+7. Use protected environments, exact image digests, explicit approvals, smoke tests and a rehearsed provider-native rollback.
 
 ## Verification and rollback
 
-- Require green GitHub Actions for the exact proposed commit before merging.
-- Validate key rotation and outage behavior with the selected identity provider; do not assume revocation semantics beyond the provider's token format and policy.
-- Verify bind address, health responses, logs and restart behavior in the target environment.
-- On configuration rollout failure, restore the prior known-good environment and image. No database migrations are part of the runtime configuration step.
+Run `go mod verify`, `make check`, workflow lint, vulnerability scan and PostgreSQL integration tests before merge. The worker readiness endpoint confirms database connectivity only; separately monitor delivery failures, pending-event age, lease expiry, retry count and dead-letter volume. On rollout failure, restore the previous immutable image and approved configuration. Do not automatically run destructive database down-migrations.

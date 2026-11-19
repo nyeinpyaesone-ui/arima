@@ -2,70 +2,73 @@
 
 ## Current implementation status
 
-ARIMA now has a Go HTTP API scaffold with OIDC JWT verification, PostgreSQL-backed tenant repository primitives, forced row-level security, migrations, audit/idempotency/outbox foundations, and a leased outbox worker package. CI runs PostgreSQL 15 integration tests using a non-superuser runtime role.
+ARIMA provides a Go HTTP API with OIDC JWT verification, PostgreSQL tenant storage, forced RLS, tenant-local roles and permissions, customer create/read routes, audit/idempotency/outbox transaction handling, and a standalone outbox worker with bounded scheduling and an authenticated HTTPS webhook publisher.
 
-Migration 0003 and `PostgresAuthorizer` now provide tenant-scoped role, permission and membership enforcement primitives; `TenantTx.RequirePermission` supports checks inside the same transaction as a business mutation. These primitives are not yet wired to business HTTP routes. Customer create/read routes now use the tenant authorization foundation. Customer creation commits the record, audit event, idempotency response and outbox event in one transaction. A standalone outbox worker and authenticated HTTPS webhook publisher are implemented; the worker uses a bounded tenant scheduler and can be run as a separate process from the same container image. The webhook receiver, hosting provider, production secrets, worker monitoring and real OIDC provider still need environment-specific configuration and staging verification. ARIMA is not yet a complete ERP application: products, inventory, sales, purchases, accounting, approvals and other domain workflows remain to be implemented.
+The customer create operation commits the customer record, audit event, idempotency response and outbox event atomically. The worker runs as a separate process from the same container image. The webhook receiver, a real OIDC provider, hosting provider, production secret store, worker delivery monitoring and rehearsed staging rollback still require environment-specific configuration and verification.
 
-The staging workflow is a guarded provider-adapter template. No live staging or production rollout has been performed.
+ARIMA is not a complete ERP application. Inventory, sales, purchasing, accounting, payments, branches, reporting, approvals and other domain workflows remain outside the implemented scope. No live staging or production rollout has been performed.
 
 ## Branch and pull-request flow
 
 1. Branch from current `main`: `feat/<short-name>`, `fix/<short-name>`, or `chore/<short-name>`.
-2. Keep changes focused; update tests, API contracts, migrations, and runbooks together.
+2. Keep changes focused; update tests, API contracts, migrations and runbooks together.
 3. Run `go mod verify`, `make check`, and `go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...`.
 4. Open a PR to `main`; do not merge while CI/security checks fail or review is outstanding.
-5. PR CI is the authoritative code-validation path. It includes PostgreSQL 15 integration tests. Environment Setup Preflight is supplemental and reads protected GitHub Environment configuration only from trusted `main`.
+5. PR CI is the authoritative code-validation path. It includes isolated PostgreSQL 15 tests for tenant controls and customer workflows, plus Compose and bootstrap-script validation.
 6. Release only from a reviewed, green commit using the release workflow and a version tag. Release publication is not deployment.
 
 ## Local environment
 
-Prerequisites: Go 1.26.11, Git, and optionally Docker/Compose. PostgreSQL 15 is required for full integration testing.
+Prerequisites: Go 1.26.11, Git, Docker Engine and the Docker Compose plugin.
 
 ```sh
 cp configs/arima.env.example .env
 make dev-config
 make dev-up
+curl --fail --silent --show-error http://127.0.0.1:8080/health/live
 curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
-
-# Go-only checks
- go mod download
-go mod verify
-make check
 ```
 
-For the outbox worker, set `ARIMA_OUTBOX_WEBHOOK_URL` to a real HTTPS receiver and `ARIMA_OUTBOX_WEBHOOK_TOKEN` in the ignored local `.env`, then run `make dev-worker`. Do not run the worker with a placeholder receiver. CI creates isolated `arima_test` and `arima_customer_test` databases and verifies both API and worker roles as non-superusers without `BYPASSRLS`.
+Compose starts PostgreSQL 15, applies migrations 0001–0003 with a local migration ledger, grants separate local-only API and worker roles, and starts the API. The database volume survives `make dev-down`; do not use `docker compose down -v` unless you intend to delete local data.
 
-The application does not automatically load dotenv files. Export supported local values explicitly or use a local secret manager. Never put production credentials in files, logs, command-line arguments, issue comments, or repository content.
+Without a configured OIDC provider, protected customer routes fail closed. To exercise them, configure a real development issuer/audience and provision the exact `sub` and `tenant_id` membership through the trusted operator process. Never manufacture a subject or role from request input.
+
+To run the worker, set a real HTTPS event receiver and its token in the ignored local `.env`, then run `make dev-worker`. The receiver must durably accept and deduplicate event IDs. Do not start the worker with a placeholder or unconfigured receiver. The worker listens on local port 8081 for health probes; keep this endpoint private outside development.
+
+The application does not load dotenv files itself. Compose reads the root `.env`; the process receives only explicitly configured environment variables. Never put production credentials in tracked files, command-line arguments, logs or issue comments.
 
 ## GitHub Environment configuration
 
-Create GitHub Environments named `development`, `staging`, and `production` only as needed.
+The **Environment Setup Preflight** workflow runs only from trusted `main`. For `staging` and `production`, configure the non-secret variables `ARIMA_OIDC_ISSUER` and `ARIMA_OIDC_AUDIENCE` so the preflight can check their presence and HTTPS issuer syntax.
 
-- `development`: use non-production credentials and isolated databases.
-- `staging` and `production`: configure variables `ARIMA_OIDC_ISSUER` and `ARIMA_OIDC_AUDIENCE`, plus secret `ARIMA_DATABASE_URL`.
-- Production database DSNs must use TLS certificate and hostname verification (`sslmode=verify-full`).
-- Use separate migration and runtime database identities. The runtime identity must not be a superuser or have `BYPASSRLS`.
-- Require reviewers and restrict deployment branches/tags for protected environments before enabling any live deployment.
+For the **staging** GitHub Environment, configure only the deployment-control values:
+- Secret `STAGING_DEPLOY_HOOK_URL`.
+- Secret `STAGING_DEPLOY_TOKEN`.
+- Variable `STAGING_HEALTHCHECK_URL` for the public API readiness endpoint.
 
-The Environment Setup Preflight checks configuration presence/syntax and code-level gates; it does not connect to the production database or prove provider token issuance, tenant authorization, or business correctness. Run it from Actions → Environment Setup Preflight → Run workflow on `main`. Feature branches are validated by PR CI.
+Runtime values and credentials (`ARIMA_DATABASE_URL`, `ARIMA_OUTBOX_DATABASE_URL`, `ARIMA_OUTBOX_WEBHOOK_URL`, `ARIMA_OUTBOX_WEBHOOK_TOKEN`) belong in the hosting provider's secret manager, not in the GitHub Actions runner or deployment payload. The provider adapter must resolve these names from the provider-side store.
+
+Require reviewers and restrict deployment branches for protected environments before any live staging or production rollout. The preflight uses temporary isolated CI PostgreSQL databases; it does not connect to target databases, validate provider-side secrets, deploy, or apply remote migrations.
 
 ## Migration and deployment boundary
 
-- The API never applies schema migrations at startup. Apply reviewed migrations in order with a dedicated migration identity.
-- The staging workflow requires an authenticated provider adapter and protected staging environment. The adapter must allow-list this repository/image, deploy the exact digest, and retain a rollback path.
+- The API and worker never apply DDL at startup. Apply migrations 0001, 0002 and 0003 as a separate reviewed operation using a dedicated migration identity.
+- Runtime API and worker identities must be `NOSUPERUSER NOBYPASSRLS`. Keep their database grants separate and verify actual catalog privileges in staging.
+- Production PostgreSQL connections must use TLS certificate and hostname verification (`sslmode=verify-full`).
+- The staging workflow requires an authenticated provider adapter and a protected GitHub Environment. It sends an immutable image digest and the required environment-variable names, not secret values.
+- The adapter must launch API and worker with separate entrypoints, resolve runtime values from the provider secret manager, and verify both readiness endpoints from inside the provider network. Keep worker port 8081 private.
 - The staging workflow does not run migrations or promote to production.
-- Use private database networking where possible, TLS verification, firewall allow-lists, least-privilege roles, connection limits, backups, and tested restore procedures.
+- Use private database networking where possible, firewall allow-lists, connection limits, backups and tested restore procedures.
 - Do not automatically apply destructive down migrations. Back up and obtain explicit approval before any rollback that deletes tenant/audit/outbox data.
-- Prefer GitHub OIDC with narrowly scoped cloud permissions when the selected target supports it. Otherwise use dedicated restricted identities and rotate credentials.
-- Production deployment must use a protected `production` Environment, least-privilege permissions, a reviewed immutable artifact, health checks, and a documented rollback. Never deploy untrusted pull-request code.
+- Production deployment must use a separate protected environment, least-privilege permissions, a reviewed immutable artifact, health checks and a documented rollback. Never deploy untrusted pull-request code.
 
-## Missing essentials before production use
+## Remaining production gates
 
-1. A real OIDC provider integration test suite and an audited operator workflow for provisioning tenant roles/memberships; the runbook currently documents the manual process.
-2. Customer and other business services/routes using transactional permission checks and atomic mutation + audit + idempotency + outbox behavior.
-3. A receiver implementing durable event acceptance/idempotency, plus worker health/metrics, backlog and dead-letter alerts.
-4. Staging verification of actual runtime/migration/worker grants, RLS, migrations, backup and restore.
-5. A selected hosting provider, authenticated adapter, protected staging rollout and rehearsed rollback.
-6. End-to-end business tests, operational SLOs, observability, capacity/load testing, and a tested production rollout plan.
+1. Configure and test a real OIDC provider, including signing-key rotation and invalid/expired token cases.
+2. Select a hosting provider and implement/review the authenticated staging adapter.
+3. Provision real migration/API/worker database roles; verify grants, RLS, TLS, backups and restore in staging.
+4. Configure a durable webhook receiver with event-ID idempotency, plus worker delivery/lag/dead-letter metrics and alerts.
+5. Rehearse staging rollout and rollback using the exact image digest.
+6. Complete remaining ERP domains, end-to-end workflows, observability, SLOs and capacity/load testing.
 
-Do not call ARIMA production-ready until these capabilities are implemented and evidenced by passing checks and a staging rehearsal.
+Do not call ARIMA production-ready until these gates are evidenced by successful integration checks and a reviewed staging rehearsal.

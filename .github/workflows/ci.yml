@@ -33,6 +33,8 @@ jobs:
       ARIMA_TEST_RUNTIME_DATABASE_URL: postgres://arima_runtime:arima_test_password@localhost:5432/arima_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.10'

@@ -60,12 +60,12 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, idempotency_keys TO arima_custom
 GRANT SELECT, INSERT ON audit_events TO arima_customer_runtime;
 GRANT SELECT, INSERT ON outbox_events TO arima_customer_runtime;
 GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO arima_customer_runtime;
-DO $
+DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arima_outbox_runtime') THEN
         CREATE ROLE arima_outbox_runtime LOGIN PASSWORD 'arima_outbox_test_password' NOSUPERUSER NOBYPASSRLS;
     END IF;
-END $;
+END $$;
 GRANT CONNECT ON DATABASE arima_customer_test TO arima_outbox_runtime;
 GRANT USAGE ON SCHEMA public TO arima_outbox_runtime;
 GRANT SELECT ON tenants TO arima_outbox_runtime;

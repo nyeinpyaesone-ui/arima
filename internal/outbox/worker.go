@@ -81,7 +81,12 @@ func (w *Worker) ProcessOne(ctx context.Context, tenantID string) (bool, error) 
 		if errors.As(deliveryErr, &coded) && safeErrorCode(coded.Code()) {
 			code = coded.Code()
 		}
-		deadLetter, err := tx.FailOutbox(ctx, event.ID, w.workerID, code, w.maxAttempts)
+		maxAttempts := w.maxAttempts
+		var permanent interface{ Permanent() bool }
+		if errors.As(deliveryErr, &permanent) && permanent.Permanent() {
+			maxAttempts = event.Attempts
+		}
+		deadLetter, err := tx.FailOutbox(ctx, event.ID, w.workerID, code, maxAttempts)
 		if err == nil {
 			w.logger.WarnContext(ctx, "outbox delivery failed", "event_id", event.ID, "event_type", event.EventType, "attempt", event.Attempts, "dead_letter", deadLetter, "error_code", code)
 		}
@@ -89,6 +94,9 @@ func (w *Worker) ProcessOne(ctx context.Context, tenantID string) (bool, error) 
 	})
 	if ackErr != nil {
 		return true, ackErr
+	}
+	if deliveryErr == nil {
+		w.logger.InfoContext(ctx, "outbox event published", "event_id", event.ID, "event_type", event.EventType, "attempt", event.Attempts)
 	}
 	return true, nil
 }

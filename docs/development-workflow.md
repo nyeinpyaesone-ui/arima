@@ -22,14 +22,18 @@ The staging workflow is a guarded provider-adapter template. No live staging or 
 Prerequisites: Go 1.26.11, Git, and optionally Docker/Compose. PostgreSQL 15 is required for full integration testing.
 
 ```sh
-export ARIMA_ADDR=127.0.0.1:8080
-go mod download
+cp configs/arima.env.example .env
+make dev-config
+make dev-up
+curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
+
+# Go-only checks
+ go mod download
 go mod verify
 make check
-go run ./cmd/erp-api
 ```
 
-For full database integration tests, provision an isolated database named `arima_test` and set both `ARIMA_TEST_DATABASE_URL` and `ARIMA_TEST_RUNTIME_DATABASE_URL`. Never point test variables at staging or production. The runtime test identity must be a non-superuser without `BYPASSRLS`.
+For the outbox worker, set `ARIMA_OUTBOX_WEBHOOK_URL` to a real HTTPS receiver and `ARIMA_OUTBOX_WEBHOOK_TOKEN` in the ignored local `.env`, then run `make dev-worker`. Do not run the worker with a placeholder receiver. CI creates isolated `arima_test` and `arima_customer_test` databases and verifies both API and worker roles as non-superusers without `BYPASSRLS`.
 
 The application does not automatically load dotenv files. Export supported local values explicitly or use a local secret manager. Never put production credentials in files, logs, command-line arguments, issue comments, or repository content.
 

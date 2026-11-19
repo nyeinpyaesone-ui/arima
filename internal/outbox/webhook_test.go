@@ -57,8 +57,8 @@ func TestHTTPSWebhookHandlerRequiresHTTPSAndToken(t *testing.T) {
 
 func TestHTTPSWebhookHandlerClassifiesRetryableAndPermanentResponses(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		status int
+		name     string
+		status   int
 		wantCode string
 	}{
 		{name: "rate limited", status: http.StatusTooManyRequests, wantCode: "webhook_retryable"},

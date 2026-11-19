@@ -102,6 +102,22 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 			t.Fatal(err)
 		}
 	}
+
+	schedulerRepo, err := NewPostgres(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstPage, err := schedulerRepo.ListTenantIDs(ctx, "", 1)
+	if err != nil || len(firstPage) != 1 {
+		t.Fatalf("first scheduler tenant page = %v, err=%v", firstPage, err)
+	}
+	secondPage, err := schedulerRepo.ListTenantIDs(ctx, firstPage[0], 1)
+	if err != nil || len(secondPage) != 1 || secondPage[0] == firstPage[0] {
+		t.Fatalf("second scheduler tenant page = %v, err=%v", secondPage, err)
+	}
+	if _, err := schedulerRepo.ListTenantIDs(ctx, "", 0); err == nil {
+		t.Fatal("invalid scheduler page size must be rejected")
+	}
 	repo, err := NewPostgres(runtimeDB)
 	if err != nil {
 		t.Fatal(err)

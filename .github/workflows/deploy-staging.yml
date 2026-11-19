@@ -40,7 +40,6 @@ jobs:
           STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
           STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
           STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
-          STAGING_WORKER_HEALTHCHECK_URL: ${{ vars.STAGING_WORKER_HEALTHCHECK_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -56,10 +55,6 @@ jobs:
             echo "::error::Configure staging variable STAGING_HEALTHCHECK_URL."
             exit 1
           }
-          test -n "$STAGING_WORKER_HEALTHCHECK_URL" || {
-            echo "::error::Configure staging variable STAGING_WORKER_HEALTHCHECK_URL."
-            exit 1
-          }
           case "$STAGING_DEPLOY_HOOK_URL" in
             https://*) ;;
             *) echo "::error::Deployment adapter URL must use HTTPS."; exit 1 ;;
@@ -67,10 +62,6 @@ jobs:
           case "$STAGING_HEALTHCHECK_URL" in
             https://*) ;;
             *) echo "::error::API health-check URL must use HTTPS."; exit 1 ;;
-          esac
-          case "$STAGING_WORKER_HEALTHCHECK_URL" in
-            https://*) ;;
-            *) echo "::error::Worker health-check URL must use HTTPS."; exit 1 ;;
           esac
 
       - name: Set up Buildx
@@ -107,7 +98,29 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$IMAGE_DIGEST" || { echo "::error::Image digest output is empty."; exit 1; }
-          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{image:$image,digest:$digest,commit:$commit,environment:"staging",services:[{name:"api",command:["/erp-api"],port:8080},{name:"outbox-worker",command:["/outbox-worker"],port:8081}]}')"
+          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{
+            image:$image,
+            digest:$digest,
+            commit:$commit,
+            environment:"staging",
+            services:[
+              {
+                name:"api",
+                entrypoint:["/erp-api"],
+                port:8080,
+                environment:{ARIMA_ENV:"production",ARIMA_ADDR:":8080"},
+                required_environment:["ARIMA_OIDC_ISSUER","ARIMA_OIDC_AUDIENCE","ARIMA_DATABASE_URL"]
+              },
+              {
+                name:"outbox-worker",
+                entrypoint:["/outbox-worker"],
+                port:8081,
+                environment:{ARIMA_ENV:"production",ARIMA_OUTBOX_HEALTH_ADDR:":8081"},
+                required_environment:["ARIMA_OUTBOX_DATABASE_URL","ARIMA_OUTBOX_WEBHOOK_URL","ARIMA_OUTBOX_WEBHOOK_TOKEN"]
+              }
+            ],
+            readiness:{all_services:true,timeout_seconds:300,private_worker_probe:"/health/ready"}
+          }')"
           # The adapter must validate this bearer token, allow-list this repo/image,
           # and deploy the digest only to staging. Never log the token or payload.
           status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
@@ -122,29 +135,21 @@ jobs:
             *) echo "::error::Staging adapter rejected the rollout request (HTTP $status)."; exit 1 ;;
           esac
 
-      - name: Verify API and worker readiness
+      - name: Verify public API readiness
         env:
           STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
-          STAGING_WORKER_HEALTHCHECK_URL: ${{ vars.STAGING_WORKER_HEALTHCHECK_URL }}
         shell: bash
         run: |
           set -euo pipefail
-          api_ready=false
-          worker_ready=false
           for _ in $(seq 1 30); do
-            if [[ "$api_ready" != true ]] && curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$STAGING_HEALTHCHECK_URL" -o /tmp/arima-api-health.json; then
-              jq -e '.status == "ready"' /tmp/arima-api-health.json >/dev/null && api_ready=true
-            fi
-            if [[ "$worker_ready" != true ]] && curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$STAGING_WORKER_HEALTHCHECK_URL" -o /tmp/arima-worker-health.json; then
-              jq -e '.status == "ready"' /tmp/arima-worker-health.json >/dev/null && worker_ready=true
-            fi
-            if [[ "$api_ready" == true && "$worker_ready" == true ]]; then
-              echo "API and outbox worker readiness endpoints report ready."
+            if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$STAGING_HEALTHCHECK_URL" -o /tmp/arima-api-health.json &&
+              jq -e '.status == "ready"' /tmp/arima-api-health.json >/dev/null; then
+              echo "API readiness endpoint reports ready. The provider adapter must also verify the worker's private /health/ready endpoint before accepting the rollout."
               exit 0
             fi
             sleep 10
           done
-          echo "::error::API and worker readiness were not both confirmed within five minutes. Use the provider's reviewed rollback controls and inspect redacted logs."
+          echo "::error::API readiness was not confirmed within five minutes. The provider adapter is responsible for private worker readiness and rollback."
           exit 1
 
       - name: State deployment boundary

@@ -47,7 +47,7 @@ Grant only the required permissions. Avoid assigning customer.write to read-only
 
 ## Runtime grants
 
-The API runtime role needs SELECT on tenant_roles, tenant_role_permissions, and tenant_memberships, plus only the DML required on tenant business, audit, idempotency and outbox tables. It must be NOSUPERUSER NOBYPASSRLS. Never grant the application runtime role authorization-table write privileges or membership administration rights.
+The API runtime role needs SELECT on tenant_roles, tenant_role_permissions, and tenant_memberships, plus only required DML on tenant business, audit, idempotency and outbox tables. The separate outbox-worker role needs SELECT on tenants and SELECT/UPDATE on outbox_events only. Both runtime roles must be NOSUPERUSER NOBYPASSRLS. Never grant either runtime role authorization-table write privileges or membership administration rights.
 
 Verify effective grants and role attributes from the actual staging database using catalog queries before exposure. Also verify each RLS table has relrowsecurity=true, relforcerowsecurity=true, and a tenant-isolation policy with both USING and WITH CHECK.
 

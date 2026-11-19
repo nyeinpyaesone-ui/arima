@@ -37,4 +37,4 @@ dev-logs:
 	docker compose logs -f database migrate api
 
 dev-down:
-	docker compose down
+	docker compose down --remove-orphans

@@ -1,0 +1,63 @@
+name: arima
+
+services:
+  database:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-arima_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a local-only POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - arima-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    image: postgres:15-alpine
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      PGHOST: database
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set a local-only POSTGRES_PASSWORD in .env}
+      PGDATABASE: ${POSTGRES_DB:-arima_dev}
+      ARIMA_API_DB_PASSWORD: ${ARIMA_API_DB_PASSWORD:?Set ARIMA_API_DB_PASSWORD in .env}
+      ARIMA_OUTBOX_DB_PASSWORD: ${ARIMA_OUTBOX_DB_PASSWORD:?Set ARIMA_OUTBOX_DB_PASSWORD in .env}
+    volumes:
+      - ./migrations:/migrations:ro
+      - ./scripts/migrate-local.sh:/scripts/migrate-local.sh:ro
+      - ./scripts/postgres/grant-runtime-roles.sql:/scripts/grant-runtime-roles.sql:ro
+    entrypoint: ["/bin/sh", "/scripts/migrate-local.sh"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      ARIMA_ENV: ${ARIMA_ENV:-development}
+      ARIMA_ADDR: ${ARIMA_ADDR:-:8080}
+      ARIMA_READ_HEADER_TIMEOUT: ${ARIMA_READ_HEADER_TIMEOUT:-5s}
+      ARIMA_READ_TIMEOUT: ${ARIMA_READ_TIMEOUT:-15s}
+      ARIMA_WRITE_TIMEOUT: ${ARIMA_WRITE_TIMEOUT:-15s}
+      ARIMA_IDLE_TIMEOUT: ${ARIMA_IDLE_TIMEOUT:-60s}
+      ARIMA_OIDC_ISSUER: ${ARIMA_OIDC_ISSUER:-}
+      ARIMA_OIDC_AUDIENCE: ${ARIMA_OIDC_AUDIENCE:-}
+      ARIMA_DATABASE_URL: ${ARIMA_DATABASE_URL:-postgres://arima_api:arima-local-api-password@database:5432/arima_dev?sslmode=disable}
+    ports:
+      - "127.0.0.1:${ARIMA_HTTP_PORT:-8080}:8080"
+    restart: unless-stopped
+
+volumes:
+  arima-postgres-data:

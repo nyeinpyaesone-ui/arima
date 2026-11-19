@@ -116,6 +116,12 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 		if err != nil {
 			return err
 		}
+		if _, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() - interval '1 second' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, outboxID); err != nil {
+			return err
+		}
+		if _, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() + interval '1 hour' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, deadLetterID); err != nil {
+			return err
+		}
 		result, err := tx.BeginIdempotency(ctx, "request-key-0001", []byte(`{"action":"update","id":"customer-1"}`), time.Hour)
 		if err != nil {
 			return err

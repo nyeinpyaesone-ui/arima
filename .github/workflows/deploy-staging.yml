@@ -32,6 +32,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
 
       # Fail before building/publishing anything if the adapter is not configured.
       - name: Validate provider adapter configuration

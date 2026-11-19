@@ -6,6 +6,7 @@ Migrations are controlled deployment steps. The API never mutates the database s
 
 1. `0001_tenant_foundation.up.sql` creates tenants, tenant-scoped records, forced PostgreSQL RLS, audit events, idempotency keys and the transactional outbox.
 2. `0002_outbox_leases.up.sql` adds worker lease ownership and expiry metadata so abandoned deliveries can be safely reclaimed.
+3. `0003_tenant_authorization.up.sql` adds tenant-scoped roles, permissions and active/suspended/revoked memberships, all protected by forced RLS.
 
 Apply in order to a disposable/test database, then a reviewed staging environment, before production:
 

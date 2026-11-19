@@ -70,16 +70,14 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 			t.Fatal(err)
 		}
 	}
-	_, err = adminDB.ExecContext(ctx, `
-INSERT INTO tenant_roles (tenant_id, role_key, display_name)
-VALUES ($1::uuid, 'operator', 'Operator');
-INSERT INTO tenant_role_permissions (tenant_id, role_key, permission)
-VALUES ($1::uuid, 'operator', 'customer.read'),
-       ($1::uuid, 'operator', 'customer.write');
-INSERT INTO tenant_memberships (tenant_id, subject, role_key, status)
-VALUES ($1::uuid, 'customer-user-1', 'operator', 'active');`, tenantA)
-	if err != nil {
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_roles (tenant_id, role_key, display_name) VALUES ($1::uuid, 'operator', 'Operator')", tenantA); err != nil {
+		t.Fatalf("seed tenant role: %v", err)
+	}
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_role_permissions (tenant_id, role_key, permission) VALUES ($1::uuid, 'operator', 'customer.read'), ($1::uuid, 'operator', 'customer.write')", tenantA); err != nil {
 		t.Fatalf("seed customer permissions: %v", err)
+	}
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'operator', 'active')", tenantA); err != nil {
+		t.Fatalf("seed customer membership: %v", err)
 	}
 
 	runtimeDB, err := sql.Open("pgx", runtimeDSN)

@@ -28,6 +28,14 @@ type Customer struct {
 	Version    int64  `json:"version"`
 }
 
+type customerData struct {
+	ExternalID string `json:"external_id"`
+	Name       string `json:"name"`
+	Phone      string `json:"phone,omitempty"`
+	Email      string `json:"email,omitempty"`
+	Notes      string `json:"notes,omitempty"`
+}
+
 type Service struct {
 	repository *store.Postgres
 }
@@ -56,7 +64,8 @@ func (s *Service) Create(ctx context.Context, principal auth.Principal, idempote
 	if len(idempotencyKey) < 8 || len(idempotencyKey) > 200 || correlationID == "" || len(correlationID) > 128 || strings.ContainsAny(correlationID, "\r\n") {
 		return Customer{}, ErrInvalidRequest
 	}
-	payload, err := json.Marshal(input)
+	data := customerData{ExternalID: input.ExternalID, Name: input.Name, Phone: input.Phone, Email: input.Email, Notes: input.Notes}
+	payload, err := json.Marshal(data)
 	if err != nil {
 		return Customer{}, fmt.Errorf("encode customer: %w", err)
 	}
@@ -91,7 +100,7 @@ func (s *Service) Create(ctx context.Context, principal auth.Principal, idempote
 		if err := tx.AppendAudit(ctx, principal.Subject, "customer.created", "customer", record.ID, "succeeded", correlationID, json.RawMessage(`{"version":1}`)); err != nil {
 			return err
 		}
-		eventPayload, err := json.Marshal(map[string]string{"customer_id": record.ID, "external_id": input.ExternalID})
+		eventPayload, err := json.Marshal(map[string]string{"customer_id": record.ID})
 		if err != nil {
 			return err
 		}
@@ -120,12 +129,15 @@ func (s *Service) Get(ctx context.Context, principal auth.Principal, externalID 
 		if err != nil {
 			return err
 		}
-		if err := json.Unmarshal(record.Payload, &result); err != nil {
+		var data customerData
+		if err := json.Unmarshal(record.Payload, &data); err != nil {
 			return fmt.Errorf("decode customer record: %w", err)
 		}
-		result.ID = record.ID
-		result.TenantID = record.TenantID
-		result.Version = record.Version
+		result = Customer{
+			ID: record.ID, TenantID: record.TenantID, ExternalID: data.ExternalID,
+			Name: data.Name, Phone: data.Phone, Email: data.Email, Notes: data.Notes,
+			Version: record.Version,
+		}
 		return nil
 	})
 	if err != nil {

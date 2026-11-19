@@ -87,9 +87,6 @@ func (p *Postgres) WithinTenant(ctx context.Context, tenantID string, fn func(*T
 	return nil
 }
 
-// RequirePermission evaluates a tenant membership and role grant inside the
-// caller's existing business transaction. This prevents authorization from
-// racing a membership revocation between a separate check and a mutation.
 // ListTenantIDs returns a bounded, ordered page for the trusted outbox scheduler.
 // The worker database identity receives SELECT on tenants but no cross-tenant business-data access.
 func (p *Postgres) ListTenantIDs(ctx context.Context, after string, limit int) ([]string, error) {
@@ -122,6 +119,9 @@ func (p *Postgres) ListTenantIDs(ctx context.Context, after string, limit int) (
 	return ids, nil
 }
 
+// RequirePermission evaluates a tenant membership and role grant inside the
+// caller's existing business transaction. This prevents authorization from
+// racing a membership revocation between a separate check and a mutation.
 func (t *TenantTx) RequirePermission(ctx context.Context, subject, permission string) error {
 	subject = strings.TrimSpace(subject)
 	permission = strings.TrimSpace(permission)

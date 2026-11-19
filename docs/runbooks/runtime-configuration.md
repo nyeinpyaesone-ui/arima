@@ -2,7 +2,7 @@
 
 ## Scope
 
-This runbook covers HTTP listener/timeouts and OIDC JWT validation. Tenant-scoped PostgreSQL schema and repository primitives exist, including RLS, audit, idempotency and outbox tables. Business routes, authorization policies, outbox delivery workers and end-to-end atomic business workflows are not implemented yet.
+This runbook covers HTTP listener/timeouts and OIDC JWT validation. The API has fail-closed OIDC startup, PostgreSQL connectivity/schema checks, tenant-scoped repository primitives, forced RLS, audit/idempotency/outbox transaction primitives, and a leased outbox worker package. The worker supports tenant-scoped claim, delivery outside the SQL transaction, owner-checked acknowledgement, lease recovery, bounded exponential retry and dead-letter transition. The worker is not wired into cmd/erp-api: a concrete publisher/handler and trusted tenant scheduler must be supplied. No production business mutation routes or complete end-to-end business workflows are exposed yet.
 
 ## Supported variables
 

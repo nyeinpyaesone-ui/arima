@@ -39,7 +39,7 @@ func main() {
 	defer db.Close()
 
 	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	err = store.VerifySchema(verifyCtx, db)
+	err = store.VerifyOutboxWorkerSchema(verifyCtx, db)
 	verifyCancel()
 	if err != nil {
 		log.Fatalf("outbox database schema verification failed: %v", err)

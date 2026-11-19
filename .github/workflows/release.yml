@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -37,9 +36,11 @@ jobs:
       ARIMA_TEST_RUNTIME_DATABASE_URL: postgres://arima_runtime:arima_test_password@localhost:5432/arima_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.10'
+          go-version: "1.26.10"
           cache: true
       - name: Lint GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
@@ -61,74 +62,50 @@ jobs:
         run: go vet ./...
       - name: Vulnerability scan
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-      - name: Race and integration tests
+      - name: Race and PostgreSQL integration tests
         run: go test -race -coverprofile=coverage.out ./...
 
-  build:
-    name: Build Linux ${{ matrix.arch }}
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            goarch: amd64
-          - arch: arm64
-            goarch: arm64
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.26.x'
-          cache: true
-      - name: Build static Linux binary
-        env:
-          GOOS: linux
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
-        run: |
-          mkdir -p dist
-          go build -trimpath -buildvcs=true -ldflags="-s -w" -o "dist/arima-api-linux-${{ matrix.arch }}" ./cmd/erp-api
-      - name: Upload release binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: arima-linux-${{ matrix.arch }}
-          path: dist/arima-api-linux-${{ matrix.arch }}
-          if-no-files-found: error
-          retention-days: 7
-
   publish:
-    name: Publish verified release
-    needs: [verify, build]
+    name: Build and publish verified release
+    needs: verify
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
-      - name: Download platform binaries
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          pattern: arima-linux-*
-          path: dist
-          merge-multiple: true
-      - name: Generate checksums
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache: true
+      - name: Build Linux amd64 and arm64 binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH="$arch" CGO_ENABLED=0 \
+              go build -trimpath -buildvcs=true -ldflags="-s -w" \
+              -o "dist/arima-api-linux-$arch" ./cmd/erp-api
+          done
+      - name: Generate SHA-256 checksums
         working-directory: dist
         run: sha256sum arima-api-linux-* > SHA256SUMS
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: 'dist/arima-api-linux-*'
+          subject-path: "dist/arima-api-linux-*"
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/arima-api-linux-amd64
-            dist/arima-api-linux-arm64
-            dist/SHA256SUMS
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/arima-api-linux-amd64 \
+            dist/arima-api-linux-arm64 \
+            dist/SHA256SUMS \
+            --verify-tag --generate-notes

@@ -39,10 +39,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.x'
+          go-version: '1.26.10'
           cache: true
-      - name: Verify pinned Go module graph
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+      - name: Verify module integrity and pinned graph
         run: |
+          go mod download
+          go mod verify
           go mod tidy
           git diff --exit-code -- go.mod go.sum
       - name: Verify formatting

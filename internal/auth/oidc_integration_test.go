@@ -35,10 +35,10 @@ func TestOIDCVerifierValidatesClaimsAndRefreshesRotatedKeys(t *testing.T) {
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"issuer": "https://" + r.Host,
-				"jwks_uri": "https://" + r.Host + "/keys",
-				"response_types_supported": []string{"id_token"},
-				"subject_types_supported": []string{"public"},
+				"issuer":                                "https://" + r.Host,
+				"jwks_uri":                              "https://" + r.Host + "/keys",
+				"response_types_supported":              []string{"id_token"},
+				"subject_types_supported":               []string{"public"},
 				"id_token_signing_alg_values_supported": []string{"RS256"},
 			})
 		case "/keys":

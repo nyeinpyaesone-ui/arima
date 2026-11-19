@@ -54,7 +54,7 @@ services:
       ARIMA_IDLE_TIMEOUT: ${ARIMA_IDLE_TIMEOUT:-60s}
       ARIMA_OIDC_ISSUER: ${ARIMA_OIDC_ISSUER:-}
       ARIMA_OIDC_AUDIENCE: ${ARIMA_OIDC_AUDIENCE:-}
-      ARIMA_DATABASE_URL: ${ARIMA_DATABASE_URL:-postgres://arima_api:arima-local-api-password@database:5432/arima_dev?sslmode=disable}
+      ARIMA_DATABASE_URL: ${ARIMA_DATABASE_URL:-postgres://arima_api:${ARIMA_API_DB_PASSWORD:-local-api-password}@database:5432/${POSTGRES_DB:-arima_dev}?sslmode=disable}
     ports:
       - "127.0.0.1:${ARIMA_HTTP_PORT:-8080}:8080"
     restart: unless-stopped

@@ -29,8 +29,14 @@ for migration in /migrations/[0-9]*.up.sql; do
             ;;
     esac
 
-    applied="$(psql -X -A -t -v ON_ERROR_STOP=1 -v version="$version" \
-        -c "SELECT EXISTS (SELECT 1 FROM public.arima_schema_migrations WHERE version = :'version')")"
+    applied="$(psql -X -A -t -v ON_ERROR_STOP=1 -v version="$version" <<'SQL'
+SELECT EXISTS (
+    SELECT 1
+    FROM public.arima_schema_migrations
+    WHERE version = :'version'
+);
+SQL
+    )"
     if [ "$applied" = "t" ]; then
         echo "Migration $version already applied; skipping."
         continue

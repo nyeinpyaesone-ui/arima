@@ -258,6 +258,15 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Make the recovery event available only after the dead-letter fixture is settled.
+	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
+		_, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() - interval '1 second' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, leaseRecoveryID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("make lease recovery event available: %v", err)
+	}
+
 	// An expired lease is reclaimable, and a stale owner cannot acknowledge it.
 	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
 		event, err := tx.ClaimOutbox(ctx, "lease-owner-old", time.Minute)

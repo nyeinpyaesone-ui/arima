@@ -13,6 +13,7 @@ import (
 )
 
 var (
+	ErrPermissionDenied     = errors.New("permission denied")
 	ErrInvalidTenant       = errors.New("tenant ID is required")
 	ErrVersionConflict     = errors.New("record version conflict")
 	ErrIdempotencyConflict = errors.New("idempotency key reused with a different request")
@@ -82,6 +83,38 @@ func (p *Postgres) WithinTenant(ctx context.Context, tenantID string, fn func(*T
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tenant transaction: %w", err)
+	}
+	return nil
+}
+
+
+// RequirePermission evaluates a tenant membership and role grant inside the
+// caller's existing business transaction. This prevents authorization from
+// racing a membership revocation between a separate check and a mutation.
+func (t *TenantTx) RequirePermission(ctx context.Context, subject, permission string) error {
+	subject = strings.TrimSpace(subject)
+	permission = strings.TrimSpace(permission)
+	if subject == "" || len(subject) > 255 || permission == "" || len(permission) > 129 {
+		return ErrPermissionDenied
+	}
+	var allowed bool
+	err := t.tx.QueryRowContext(ctx, `
+SELECT EXISTS (
+    SELECT 1
+    FROM tenant_memberships membership
+    JOIN tenant_role_permissions role_permission
+      ON role_permission.tenant_id = membership.tenant_id
+     AND role_permission.role_key = membership.role_key
+    WHERE membership.tenant_id = $1::uuid
+      AND membership.subject = $2
+      AND membership.status = 'active'
+      AND role_permission.permission = $3
+)`, t.tenantID, subject, permission).Scan(&allowed)
+	if err != nil {
+		return fmt.Errorf("evaluate tenant permission: %w", err)
+	}
+	if !allowed {
+		return ErrPermissionDenied
 	}
 	return nil
 }

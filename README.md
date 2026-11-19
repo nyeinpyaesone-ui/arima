@@ -13,7 +13,7 @@
 - Require verified CI before merging.
 
 ## Quick start
-Requirements: Go 1.23+.
+Requirements: Go 1.26.10 (the CI and container build toolchain).
 
 ```sh
 go test ./...
@@ -53,7 +53,7 @@ Implemented: health probes, validated HTTP runtime settings, OIDC JWT verificati
 
 Implemented foundation: versioned PostgreSQL migration for tenant-scoped records, forced row-level security (RLS), audit events, idempotency keys and outbox events; a tenant-scoped transaction repository; optimistic record version checks; and PostgreSQL-backed integration tests in CI. The application does not run migrations automatically.
 
-Still not implemented: business resource/action routes, role/policy authorization, an outbox publisher/worker, operational retention/replay policies, and end-to-end business workflows that use the repository transaction to atomically persist a mutation, audit event, idempotency response and outbox event. OpenAPI contracts for planned endpoints do not mean those routes are live. Do not expose this scaffold as production ERP functionality.
+Still not implemented: business resource/action routes, complete role/policy and tenant-membership enforcement, a concrete outbox publisher and trusted tenant scheduler, operational retention/replay policies, and end-to-end business workflows that atomically persist a mutation, audit event, idempotency response and outbox event. The leased outbox worker engine exists as a reusable package but is not wired into the API executable. OpenAPI contracts for planned endpoints do not mean those routes are live. Do not expose this scaffold as production ERP functionality. OpenAPI contracts for planned endpoints do not mean those routes are live. Do not expose this scaffold as production ERP functionality.
 
 ## Layout
 - `cmd/erp-api`: executable entry point.

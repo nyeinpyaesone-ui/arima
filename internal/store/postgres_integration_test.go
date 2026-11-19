@@ -183,6 +183,7 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 	var recordID string
 	var outboxID string
 	var deadLetterID string
+	var leaseRecoveryID string
 	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
 		record, err := tx.UpsertRecord(ctx, "customer", "customer-1", 0, json.RawMessage(`{"name":"Tenant A"}`))
 		if err != nil {
@@ -213,10 +214,17 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 		if err != nil {
 			return err
 		}
+		leaseRecoveryID, err = tx.EnqueueOutbox(ctx, "customer", recordID, "customer.lease_recovery", json.RawMessage(`{"record_id":"`+recordID+`"}`))
+		if err != nil {
+			return err
+		}
 		if _, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() - interval '1 second' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, outboxID); err != nil {
 			return err
 		}
 		if _, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() + interval '1 hour' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, deadLetterID); err != nil {
+			return err
+		}
+		if _, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() - interval '1 second' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, leaseRecoveryID); err != nil {
 			return err
 		}
 		result, err := tx.BeginIdempotency(ctx, "request-key-0001", []byte(`{"action":"update","id":"customer-1"}`), time.Hour)
@@ -268,6 +276,44 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An expired lease is reclaimable, and a stale owner cannot acknowledge it.
+	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
+		event, err := tx.ClaimOutbox(ctx, "lease-owner-old", time.Minute)
+		if err != nil {
+			return err
+		}
+		if event.ID != leaseRecoveryID || event.Attempts != 1 {
+			t.Fatalf("unexpected first lease claim: %#v", event)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("claim initial lease: %v", err)
+	}
+	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
+		_, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET lease_until = now() - interval '1 second' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, leaseRecoveryID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("expire outbox lease: %v", err)
+	}
+	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
+		event, err := tx.ClaimOutbox(ctx, "lease-owner-new", time.Minute)
+		if err != nil {
+			return err
+		}
+		if event.ID != leaseRecoveryID || event.Attempts != 2 {
+			t.Fatalf("expired lease was not reclaimed: %#v", event)
+		}
+		if err := tx.MarkOutboxPublished(ctx, event.ID, "lease-owner-old"); err == nil {
+			t.Fatal("stale lease owner must not acknowledge reclaimed event")
+		}
+		return tx.MarkOutboxPublished(ctx, event.ID, "lease-owner-new")
+	})
+	if err != nil {
+		t.Fatalf("reclaim and acknowledge expired lease: %v", err)
+	}
+
 	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
 		if _, err := tx.ClaimOutbox(ctx, "integration-worker-3", time.Minute); !errors.Is(err, ErrNoOutboxEvent) {
 			t.Fatalf("published/dead-letter events must not be claimed again, got %v", err)

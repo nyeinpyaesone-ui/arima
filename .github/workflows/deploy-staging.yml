@@ -98,7 +98,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$IMAGE_DIGEST" || { echo "::error::Image digest output is empty."; exit 1; }
-          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{image:$image,digest:$digest,commit:$commit,environment:"staging"}')"
+          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{image:$image,digest:$digest,commit:$commit,environment:"staging",services:[{name:"api",command:["/erp-api"],port:8080},{name:"outbox-worker",command:["/outbox-worker"]}]}')"
           # The adapter must validate this bearer token, allow-list this repo/image,
           # and deploy the digest only to staging. Never log the token or payload.
           status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \

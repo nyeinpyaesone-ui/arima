@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
@@ -37,6 +39,11 @@ func main() {
 	dsn := strings.TrimSpace(os.Getenv("ARIMA_DATABASE_URL"))
 	if production && dsn == "" {
 		log.Fatal("ARIMA_ENV=production requires ARIMA_DATABASE_URL")
+	}
+	if production {
+		if err := store.ValidateProductionDSN(dsn); err != nil {
+			log.Fatalf("invalid production PostgreSQL configuration: %v", err)
+		}
 	}
 	if dsn != "" {
 		dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -77,9 +84,32 @@ func main() {
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
+		MaxHeaderBytes:    1 << 20,
 	}
-	log.Printf("ARIMA ERP API listening on %s", cfg.Addr)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("HTTP server failed: %v", err)
+
+	serverErrors := make(chan error, 1)
+	go func() {
+		log.Printf("ARIMA ERP API listening on %s", cfg.Addr)
+		serverErrors <- server.ListenAndServe()
+	}()
+
+	shutdownSignal, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err := <-serverErrors:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("HTTP server stopped with error: %v", err)
+		}
+	case <-shutdownSignal.Done():
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer shutdownCancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("graceful HTTP shutdown failed: %v", err)
+			_ = server.Close()
+		}
+		if err := <-serverErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("HTTP server stopped with error: %v", err)
+		}
 	}
 }

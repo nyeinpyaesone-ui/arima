@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -37,6 +38,13 @@ func main() {
 	}
 	defer db.Close()
 
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	err = store.VerifySchema(verifyCtx, db)
+	verifyCancel()
+	if err != nil {
+		log.Fatalf("outbox database schema verification failed: %v", err)
+	}
+
 	repository, err := store.NewPostgres(db)
 	if err != nil {
 		log.Fatalf("initialize outbox repository: %v", err)
@@ -51,11 +59,43 @@ func main() {
 		log.Fatalf("initialize outbox worker: %v", err)
 	}
 
+	healthAddr := getenv("ARIMA_OUTBOX_HEALTH_ADDR")
+	if healthAddr == "" {
+		healthAddr = ":8081"
+	}
+	healthServer := &http.Server{
+		Addr: healthAddr, Handler: outbox.NewHealthHandler(db),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second,
+		WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second,
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	logger.Info("outbox worker started")
-	if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Fatalf("outbox worker stopped: %v", err)
+
+	healthErrors := make(chan error, 1)
+	go func() { healthErrors <- healthServer.ListenAndServe() }()
+	workerErrors := make(chan error, 1)
+	go func() { workerErrors <- worker.Run(ctx) }()
+
+	logger.Info("outbox worker started", "health_addr", healthAddr)
+	select {
+	case err := <-workerErrors:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("outbox worker stopped", "error", err)
+		}
+		stop()
+	case err := <-healthErrors:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("outbox health server stopped", "error", err)
+		}
+		stop()
+	case <-ctx.Done():
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := healthServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("outbox health server shutdown failed", "error", err)
+		_ = healthServer.Close()
 	}
 	logger.Info("outbox worker stopped")
 }

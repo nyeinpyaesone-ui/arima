@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
 	"github.com/nyeinpyaesone-ui/arima/internal/store"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func TestCustomerServicePostgresAtomicCreateAndAuthorization(t *testing.T) {

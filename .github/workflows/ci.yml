@@ -62,8 +62,13 @@ jobs:
           }
           trap cleanup EXIT
 
-          POSTGRES_PORT=55432 ARIMA_HTTP_PORT=18080 ARIMA_OUTBOX_HEALTH_PORT=18081 \
-            "${compose[@]}" up --build -d api outbox-worker
+          if ! POSTGRES_PORT=55432 ARIMA_HTTP_PORT=18080 ARIMA_OUTBOX_HEALTH_PORT=18081 \
+            "${compose[@]}" up --build -d api outbox-worker; then
+            "${compose[@]}" ps --all || true
+            "${compose[@]}" logs --no-color database migrate || true
+            echo "::error::Local Compose startup failed; database and migration logs are shown above."
+            exit 1
+          fi
 
           for attempt in $(seq 1 45); do
             if curl --fail --silent --show-error http://127.0.0.1:18080/health/ready >/dev/null &&

@@ -93,7 +93,7 @@ func TestCustomerRoutesRequireBearerAndConfiguredService(t *testing.T) {
 	}{
 		{name: "create requires bearer", path: "/api/v1/customers", method: http.MethodPost, want: http.StatusUnauthorized},
 		{name: "read requires bearer", path: "/api/v1/customers/customer-1", method: http.MethodGet, want: http.StatusUnauthorized},
-		{name: "create unavailable without service", path: "/api/v1/customers", method: http.MethodPost, token: "valid-test-token", want: http.StatusUnsupportedMediaType},
+		{name: "create unavailable without service", path: "/api/v1/customers", method: http.MethodPost, token: "valid-test-token", want: http.StatusServiceUnavailable},
 		{name: "read unavailable without service", path: "/api/v1/customers/customer-1", method: http.MethodGet, token: "valid-test-token", want: http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

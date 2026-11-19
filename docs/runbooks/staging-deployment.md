@@ -44,7 +44,7 @@ A vendor-provided one-click deploy hook is not assumed to implement this contrac
 - The image contains `/erp-api` and `/outbox-worker`. The worker uses an authenticated HTTPS webhook publisher, idempotency headers, bounded request timeout, bounded tenant-page scheduling, lease recovery and retry/dead-letter handling.
 - A successful rollout validates container delivery and process/dependency readiness, not production ERP business readiness.
 - Image publishing on push to `main` is handled by the container-image workflow. The staging workflow builds and publishes the selected commit itself so the rollout is tied to the image digest emitted in that run.
-- No provider adapter has been selected or verified yet. The API readiness probe does not verify worker liveness; platform process monitoring and worker log/alert integration are required.
+- No provider adapter has been selected or verified yet. The API readiness probe does not verify worker liveness. The worker exposes its own `/health/live` and `/health/ready` endpoints on port 8081; worker readiness confirms database connectivity only, so webhook delivery success, queue lag and dead-letter alerts still require metrics/alert integration.
 
 ## PostgreSQL
 

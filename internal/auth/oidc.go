@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"net/url"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 )
@@ -22,6 +23,11 @@ func NewOIDCVerifier(ctx context.Context, issuer, audience string) (*OIDCVerifie
 	audience = strings.TrimSpace(audience)
 	if issuer == "" || audience == "" {
 		return nil, ErrOIDCNotConfigured
+	}
+	parsedIssuer, err := url.Parse(issuer)
+	if err != nil || parsedIssuer.Scheme != "https" || parsedIssuer.Hostname() == "" ||
+		parsedIssuer.User != nil || parsedIssuer.RawQuery != "" || parsedIssuer.Fragment != "" {
+		return nil, errors.New("OIDC issuer must be an absolute HTTPS URL without user info, query, or fragment")
 	}
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {

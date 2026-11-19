@@ -65,7 +65,7 @@ Provision roles, permissions and membership through the trusted operator process
 
 ## Outbox worker
 
-The same container image includes /erp-api and /outbox-worker. The worker process is started by overriding the container command to /outbox-worker.
+The same container image includes /erp-api and /outbox-worker. The worker process is started by overriding the container command to /outbox-worker. It exposes internal liveness/readiness endpoints on port 8081; readiness checks the worker database connection only, not webhook delivery.
 
 Required worker environment:
 

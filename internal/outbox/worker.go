@@ -74,7 +74,7 @@ func (w *Worker) ProcessOne(ctx context.Context, tenantID string) (bool, error) 
 		}
 		code := "delivery_failed"
 		var coded interface{ Code() string }
-		if errors.As(deliveryErr, &coded) && coded.Code() != "" {
+		if errors.As(deliveryErr, &coded) && safeErrorCode(coded.Code()) {
 			code = coded.Code()
 		}
 		deadLetter, err := tx.FailOutbox(ctx, event.ID, w.workerID, code, w.maxAttempts)
@@ -108,4 +108,18 @@ func (w *Worker) RunTenant(ctx context.Context, tenantID string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+func safeErrorCode(value string) bool {
+	if value == "" || len(value) > 100 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }

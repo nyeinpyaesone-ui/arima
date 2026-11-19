@@ -93,6 +93,47 @@ func (w *Worker) ProcessOne(ctx context.Context, tenantID string) (bool, error) 
 	return true, nil
 }
 
+// Run schedules bounded tenant pages and drains a bounded batch per tenant.
+// Multiple worker replicas are safe because ClaimOutbox uses SKIP LOCKED leases.
+func (w *Worker) Run(ctx context.Context) error {
+	ticker := time.NewTicker(w.pollEvery)
+	defer ticker.Stop()
+	for {
+		after := ""
+		for {
+			tenantIDs, err := w.repository.ListTenantIDs(ctx, after, 500)
+			if err != nil {
+				w.logger.ErrorContext(ctx, "outbox tenant scan failed", "error", err)
+				break
+			}
+			if len(tenantIDs) == 0 {
+				break
+			}
+			for _, tenantID := range tenantIDs {
+				for batch := 0; batch < 50; batch++ {
+					processed, err := w.ProcessOne(ctx, tenantID)
+					if err != nil {
+						w.logger.ErrorContext(ctx, "outbox tenant processing failed", "tenant_id", tenantID, "error", err)
+						break
+					}
+					if !processed {
+						break
+					}
+				}
+				after = tenantID
+			}
+			if len(tenantIDs) < 500 {
+				break
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 // RunTenant polls one tenant until cancellation. Tenant enumeration is deliberately
 // external so a worker never needs cross-tenant access to RLS-protected event data.
 func (w *Worker) RunTenant(ctx context.Context, tenantID string) error {

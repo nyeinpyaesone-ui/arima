@@ -90,6 +90,34 @@ func (p *Postgres) WithinTenant(ctx context.Context, tenantID string, fn func(*T
 // RequirePermission evaluates a tenant membership and role grant inside the
 // caller's existing business transaction. This prevents authorization from
 // racing a membership revocation between a separate check and a mutation.
+// ListTenantIDs returns a bounded, ordered page for the trusted outbox scheduler.
+// The worker database identity receives SELECT on tenants but no cross-tenant business-data access.
+func (p *Postgres) ListTenantIDs(ctx context.Context, after string, limit int) ([]string, error) {
+	if p == nil || p.db == nil {
+		return nil, errors.New("database store is not initialized")
+	}
+	if limit < 1 || limit > 5000 {
+		return nil, errors.New("tenant page size must be between 1 and 5000")
+	}
+	rows, err := p.db.QueryContext(ctx, "SELECT id::text FROM tenants WHERE id > NULLIF($1, '')::uuid ORDER BY id LIMIT $2", after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list tenant IDs for scheduler: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0, limit)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan tenant ID: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenant IDs: %w", err)
+	}
+	return ids, nil
+}
+
 func (t *TenantTx) RequirePermission(ctx context.Context, subject, permission string) error {
 	subject = strings.TrimSpace(subject)
 	permission = strings.TrimSpace(permission)

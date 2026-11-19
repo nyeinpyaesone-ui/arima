@@ -17,10 +17,11 @@ import (
 func TestCustomerServicePostgresAtomicCreateAndAuthorization(t *testing.T) {
 	adminDSN := strings.TrimSpace(os.Getenv("ARIMA_CUSTOMER_TEST_DATABASE_URL"))
 	runtimeDSN := strings.TrimSpace(os.Getenv("ARIMA_CUSTOMER_TEST_RUNTIME_DATABASE_URL"))
-	if adminDSN == "" || runtimeDSN == "" {
+	workerDSN := strings.TrimSpace(os.Getenv("ARIMA_CUSTOMER_TEST_WORKER_DATABASE_URL"))
+	if adminDSN == "" || runtimeDSN == "" || workerDSN == "" {
 		t.Skip("isolated customer PostgreSQL integration database is not configured")
 	}
-	if !strings.Contains(adminDSN, "/arima_customer_test") || !strings.Contains(runtimeDSN, "/arima_customer_test") {
+	if !strings.Contains(adminDSN, "/arima_customer_test") || !strings.Contains(runtimeDSN, "/arima_customer_test") || !strings.Contains(workerDSN, "/arima_customer_test") {
 		t.Fatal("refusing to run customer integration test outside arima_customer_test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -58,7 +59,17 @@ GRANT USAGE ON SCHEMA public TO arima_customer_runtime;
 GRANT SELECT, INSERT, UPDATE ON tenant_records, idempotency_keys TO arima_customer_runtime;
 GRANT SELECT, INSERT ON audit_events TO arima_customer_runtime;
 GRANT SELECT, INSERT ON outbox_events TO arima_customer_runtime;
-GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO arima_customer_runtime;`)
+GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO arima_customer_runtime;
+DO $
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arima_outbox_runtime') THEN
+        CREATE ROLE arima_outbox_runtime LOGIN PASSWORD 'arima_outbox_test_password' NOSUPERUSER NOBYPASSRLS;
+    END IF;
+END $;
+GRANT CONNECT ON DATABASE arima_customer_test TO arima_outbox_runtime;
+GRANT USAGE ON SCHEMA public TO arima_outbox_runtime;
+GRANT SELECT ON tenants TO arima_outbox_runtime;
+GRANT SELECT, UPDATE ON outbox_events TO arima_outbox_runtime;`)
 	if err != nil {
 		t.Fatalf("provision restricted customer runtime role: %v", err)
 	}
@@ -145,5 +156,55 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 	}
 	if auditCount != 1 || outboxCount != 1 || idempotencyCount != 1 {
 		t.Fatalf("failed/replayed operations left partial side effects: audit=%d outbox=%d idempotency=%d", auditCount, outboxCount, idempotencyCount)
+	}
+
+	workerDB, err := sql.Open("pgx", workerDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerDB.Close()
+	if err := workerDB.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.VerifyOutboxWorkerSchema(ctx, workerDB); err != nil {
+		t.Fatalf("verify restricted worker schema: %v", err)
+	}
+	workerRepository, err := store.NewPostgres(workerDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantPage, err := workerRepository.ListTenantIDs(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("worker tenant scheduler query: %v", err)
+	}
+	foundTenant := false
+	for _, tenantID := range tenantPage {
+		if tenantID == tenantA {
+			foundTenant = true
+		}
+	}
+	if !foundTenant {
+		t.Fatalf("worker tenant scheduler did not return tenant %s: %v", tenantA, tenantPage)
+	}
+	var workerEvent store.OutboxEvent
+	if err := workerRepository.WithinTenant(ctx, tenantA, func(tx *store.TenantTx) error {
+		event, err := tx.ClaimOutbox(ctx, "integration-outbox-worker", time.Minute)
+		if err != nil {
+			return err
+		}
+		workerEvent = event
+		return tx.MarkOutboxPublished(ctx, event.ID, "integration-outbox-worker")
+	}); err != nil {
+		t.Fatalf("restricted worker claim and acknowledgement: %v", err)
+	}
+	if workerEvent.EventType != "customer.created" {
+		t.Fatalf("worker claimed unexpected event: %#v", workerEvent)
+	}
+	var canReadBusinessData, canReadMemberships bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT has_table_privilege('arima_outbox_runtime', 'tenant_records', 'SELECT'), has_table_privilege('arima_outbox_runtime', 'tenant_memberships', 'SELECT')").Scan(&canReadBusinessData, &canReadMemberships); err != nil {
+		t.Fatal(err)
+	}
+	if canReadBusinessData || canReadMemberships {
+		t.Fatalf("worker role has excessive privileges: tenant_records=%t tenant_memberships=%t", canReadBusinessData, canReadMemberships)
 	}
 }

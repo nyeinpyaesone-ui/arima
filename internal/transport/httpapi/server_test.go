@@ -89,7 +89,7 @@ func TestCustomerRoutesRequireBearerAndConfiguredService(t *testing.T) {
 	handler := NewWithCustomerService(testVerifier{}, nil, nil)
 	for _, tc := range []struct {
 		name, path, method, token string
-		want int
+		want                      int
 	}{
 		{name: "create requires bearer", path: "/api/v1/customers", method: http.MethodPost, want: http.StatusUnauthorized},
 		{name: "read requires bearer", path: "/api/v1/customers/customer-1", method: http.MethodGet, want: http.StatusUnauthorized},

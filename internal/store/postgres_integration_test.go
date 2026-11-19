@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nyeinpyaesone-ui/arima/internal/auth"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -34,7 +36,7 @@ func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, migrationName := range []string{"0001_tenant_foundation.up.sql", "0002_outbox_leases.up.sql"} {
+	for _, migrationName := range []string{"0001_tenant_foundation.up.sql", "0002_outbox_leases.up.sql", "0003_tenant_authorization.up.sql"} {
 		migration, err := os.ReadFile("../../migrations/" + migrationName)
 		if err != nil {
 			t.Fatal(err)
@@ -42,6 +44,28 @@ func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 		if _, err := db.ExecContext(ctx, string(migration)); err != nil {
 			t.Fatalf("apply %s to isolated test database: %v", migrationName, err)
 		}
+	}
+	// Seed tenant membership and permission fixtures through the migration identity.
+	_, err = db.ExecContext(ctx, `
+INSERT INTO tenants (id, slug) VALUES
+ ('11111111-1111-4111-8111-111111111111', 'integration-tenant-a'),
+ ('22222222-2222-4222-8222-222222222222', 'integration-tenant-b')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO tenant_roles (tenant_id, role_key, display_name)
+VALUES
+ ('11111111-1111-4111-8111-111111111111', 'operator', 'Operator'),
+ ('22222222-2222-4222-8222-222222222222', 'operator', 'Operator')
+ON CONFLICT DO NOTHING;
+INSERT INTO tenant_role_permissions (tenant_id, role_key, permission)
+VALUES ('11111111-1111-4111-8111-111111111111', 'operator', 'customer.read')
+ON CONFLICT DO NOTHING;
+INSERT INTO tenant_memberships (tenant_id, subject, role_key, status)
+VALUES
+ ('11111111-1111-4111-8111-111111111111', 'user-a', 'operator', 'active'),
+ ('22222222-2222-4222-8222-222222222222', 'user-a', 'operator', 'suspended')
+ON CONFLICT (tenant_id, subject) DO UPDATE SET status = EXCLUDED.status;`)
+	if err != nil {
+		t.Fatalf("seed tenant authorization fixtures: %v", err)
 	}
 	if err := VerifySchema(ctx, db); err != nil {
 		t.Fatalf("verify migrated schema and forced tenant RLS: %v", err)
@@ -55,7 +79,8 @@ BEGIN
 END $$;
 GRANT CONNECT ON DATABASE arima_test TO arima_runtime;
 GRANT USAGE ON SCHEMA public TO arima_runtime;
-GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, outbox_events TO arima_runtime;`)
+GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, outbox_events TO arima_runtime;
+GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO arima_runtime;`)
 	if err != nil {
 		t.Fatalf("create restricted runtime test role: %v", err)
 	}
@@ -78,6 +103,23 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 	repo, err := NewPostgres(runtimeDB)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	authorizer, err := auth.NewPostgresAuthorizer(runtimeDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := authorizer.Authorize(ctx, auth.Principal{Subject: "user-a", TenantID: tenantA}, "customer.read"); err != nil {
+		t.Fatalf("active tenant membership should grant permission: %v", err)
+	}
+	if err := authorizer.Authorize(ctx, auth.Principal{Subject: "user-a", TenantID: tenantB}, "customer.read"); !errors.Is(err, auth.ErrPermissionDenied) {
+		t.Fatalf("suspended membership must be denied: %v", err)
+	}
+	if err := authorizer.Authorize(ctx, auth.Principal{Subject: "unknown-user", TenantID: tenantA}, "customer.read"); !errors.Is(err, auth.ErrPermissionDenied) {
+		t.Fatalf("unknown tenant member must be denied: %v", err)
+	}
+	if err := authorizer.Authorize(ctx, auth.Principal{Subject: "user-a", TenantID: tenantA}, "customer.write"); !errors.Is(err, auth.ErrPermissionDenied) {
+		t.Fatalf("ungranted permission must be denied: %v", err)
 	}
 	if err := repo.WithinTenant(ctx, "not-a-uuid", func(*TenantTx) error { return nil }); !errors.Is(err, ErrInvalidTenant) {
 		t.Fatalf("invalid tenant ID should be rejected before opening a transaction, got %v", err)

@@ -27,10 +27,10 @@ paths:
       operationId: readiness
       security: []
       summary: Readiness probe
-      description: Process-only response; dependency checks are not implemented.
+      description: Confirms process readiness and, when configured, PostgreSQL connectivity.
       responses:
         '200':
-          description: Process currently accepts requests
+          description: Process and configured dependencies are ready
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Health' }
@@ -38,7 +38,7 @@ paths:
     get:
       operationId: currentIdentity
       summary: Return the authenticated subject and tenant
-      description: Requires configured OAuth token introspection. Returns 503 when authentication is not configured.
+      description: Requires a valid OIDC JWT access token. Signature, issuer, audience, expiry and not-before are verified using provider discovery and JWKS. Returns 503 when authentication is not configured.
       responses:
         '200':
           description: Verified caller identity

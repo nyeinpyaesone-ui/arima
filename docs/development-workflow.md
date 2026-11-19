@@ -4,7 +4,7 @@
 
 ARIMA now has a Go HTTP API scaffold with OIDC JWT verification, PostgreSQL-backed tenant repository primitives, forced row-level security, migrations, audit/idempotency/outbox foundations, and a leased outbox worker package. CI runs PostgreSQL 15 integration tests using a non-superuser runtime role.
 
-This is still not a complete ERP application. Production business mutation routes, complete role/policy and tenant-membership authorization, a concrete outbox publisher, trusted tenant scheduler, and end-to-end business workflows are not implemented. The worker package is not wired into the API executable. A real OIDC provider and production database roles must be configured and verified in the target environment.
+Migration 0003 and `PostgresAuthorizer` now provide tenant-scoped role, permission and membership enforcement primitives; `TenantTx.RequirePermission` supports checks inside the same transaction as a business mutation. These primitives are not yet wired to business HTTP routes. This is still not a complete ERP application: business workflows, a concrete outbox publisher, trusted tenant scheduler, and end-to-end tests remain outstanding. The worker package is not wired into the API executable. A real OIDC provider and production database roles must be configured and verified in the target environment.
 
 The staging workflow is a guarded provider-adapter template. No live staging or production rollout has been performed.
 

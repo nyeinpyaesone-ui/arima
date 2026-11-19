@@ -25,7 +25,7 @@ The adapter must:
 
 1. Require HTTPS and authenticate the `Authorization: Bearer` token; compare it safely and support rotation.
 2. Allow-list repository and image namespace `ghcr.io/nyeinpyaesone-ui/arima`.
-3. Accept JSON fields `image`, `digest`, `commit`, `environment`, and `services`. The services array declares the API process (`/erp-api`, port 8080) and worker process (`/outbox-worker`).
+3. Accept JSON fields `image`, `digest`, `commit`, `environment`, and `services`. The services array declares the API process (`/erp-api`, port 8080) and worker process (`/outbox-worker`, port 8081).
 4. Reject any environment other than `staging`; deploy both processes from the exact supplied digest, not a mutable tag. The worker process must override the image command to `/outbox-worker`.
 5. Return a 2xx response only after the provider accepts the staging rollout request.
 6. Preserve the previous known-good revision and document/rehearse provider-native rollback.

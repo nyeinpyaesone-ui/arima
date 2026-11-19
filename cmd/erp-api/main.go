@@ -13,6 +13,7 @@ import (
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
 	"github.com/nyeinpyaesone-ui/arima/internal/config"
+	"github.com/nyeinpyaesone-ui/arima/internal/customer"
 	"github.com/nyeinpyaesone-ui/arima/internal/store"
 	"github.com/nyeinpyaesone-ui/arima/internal/transport/httpapi"
 )
@@ -36,6 +37,7 @@ func main() {
 
 	var dbCloser interface{ Close() error }
 	var dbPing func(context.Context) error
+	var customerService *customer.Service
 	dsn := strings.TrimSpace(os.Getenv("ARIMA_DATABASE_URL"))
 	if production && dsn == "" {
 		log.Fatal("ARIMA_ENV=production requires ARIMA_DATABASE_URL")
@@ -54,6 +56,14 @@ func main() {
 		}
 		dbCloser = db
 		dbPing = db.PingContext
+		postgresStore, err := store.NewPostgres(db)
+		if err != nil {
+			log.Fatalf("initialize PostgreSQL repository: %v", err)
+		}
+		customerService, err = customer.NewService(postgresStore)
+		if err != nil {
+			log.Fatalf("initialize customer service: %v", err)
+		}
 		if production {
 			schemaCtx, schemaCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			err := store.VerifySchema(schemaCtx, db)
@@ -79,7 +89,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.NewWithDependencies(verifier, readiness),
+		Handler:           httpapi.NewWithCustomerService(verifier, readiness, customerService),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,

@@ -40,6 +40,7 @@ jobs:
           STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
           STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
           STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+          STAGING_WORKER_HEALTHCHECK_URL: ${{ vars.STAGING_WORKER_HEALTHCHECK_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -55,13 +56,21 @@ jobs:
             echo "::error::Configure staging variable STAGING_HEALTHCHECK_URL."
             exit 1
           }
+          test -n "$STAGING_WORKER_HEALTHCHECK_URL" || {
+            echo "::error::Configure staging variable STAGING_WORKER_HEALTHCHECK_URL."
+            exit 1
+          }
           case "$STAGING_DEPLOY_HOOK_URL" in
             https://*) ;;
             *) echo "::error::Deployment adapter URL must use HTTPS."; exit 1 ;;
           esac
           case "$STAGING_HEALTHCHECK_URL" in
             https://*) ;;
-            *) echo "::error::Health-check URL must use HTTPS."; exit 1 ;;
+            *) echo "::error::API health-check URL must use HTTPS."; exit 1 ;;
+          esac
+          case "$STAGING_WORKER_HEALTHCHECK_URL" in
+            https://*) ;;
+            *) echo "::error::Worker health-check URL must use HTTPS."; exit 1 ;;
           esac
 
       - name: Set up Buildx
@@ -98,7 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$IMAGE_DIGEST" || { echo "::error::Image digest output is empty."; exit 1; }
-          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{image:$image,digest:$digest,commit:$commit,environment:"staging",services:[{name:"api",command:["/erp-api"],port:8080},{name:"outbox-worker",command:["/outbox-worker"]}]}')"
+          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{image:$image,digest:$digest,commit:$commit,environment:"staging",services:[{name:"api",command:["/erp-api"],port:8080},{name:"outbox-worker",command:["/outbox-worker"],port:8081}]}')"
           # The adapter must validate this bearer token, allow-list this repo/image,
           # and deploy the digest only to staging. Never log the token or payload.
           status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
@@ -113,22 +122,29 @@ jobs:
             *) echo "::error::Staging adapter rejected the rollout request (HTTP $status)."; exit 1 ;;
           esac
 
-      - name: Verify staging readiness
+      - name: Verify API and worker readiness
         env:
           STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+          STAGING_WORKER_HEALTHCHECK_URL: ${{ vars.STAGING_WORKER_HEALTHCHECK_URL }}
         shell: bash
         run: |
           set -euo pipefail
+          api_ready=false
+          worker_ready=false
           for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$STAGING_HEALTHCHECK_URL" -o /tmp/arima-health.json; then
-              if jq -e '.status == "ready"' /tmp/arima-health.json >/dev/null; then
-                echo "Staging process readiness endpoint reports ready."
-                exit 0
-              fi
+            if [[ "$api_ready" != true ]] && curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$STAGING_HEALTHCHECK_URL" -o /tmp/arima-api-health.json; then
+              jq -e '.status == "ready"' /tmp/arima-api-health.json >/dev/null && api_ready=true
+            fi
+            if [[ "$worker_ready" != true ]] && curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$STAGING_WORKER_HEALTHCHECK_URL" -o /tmp/arima-worker-health.json; then
+              jq -e '.status == "ready"' /tmp/arima-worker-health.json >/dev/null && worker_ready=true
+            fi
+            if [[ "$api_ready" == true && "$worker_ready" == true ]]; then
+              echo "API and outbox worker readiness endpoints report ready."
+              exit 0
             fi
             sleep 10
           done
-          echo "::error::Staging did not report ready within five minutes. Use the provider's reviewed rollback controls and inspect redacted logs."
+          echo "::error::API and worker readiness were not both confirmed within five minutes. Use the provider's reviewed rollback controls and inspect redacted logs."
           exit 1
 
       - name: State deployment boundary

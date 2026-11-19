@@ -21,6 +21,7 @@ type Worker struct {
 	handler     Handler
 	workerID    string
 	lease       time.Duration
+	deliveryTimeout time.Duration
 	maxAttempts int
 	pollEvery   time.Duration
 	logger      *slog.Logger
@@ -45,6 +46,7 @@ func NewWorker(repository *store.Postgres, handler Handler, lease, pollEvery tim
 		handler:     handler,
 		workerID:    hex.EncodeToString(randomID[:]),
 		lease:       lease,
+		deliveryTimeout: lease / 2,
 		maxAttempts: maxAttempts,
 		pollEvery:   pollEvery,
 		logger:      logger,
@@ -67,7 +69,9 @@ func (w *Worker) ProcessOne(ctx context.Context, tenantID string) (bool, error) 
 		return false, err
 	}
 
-	deliveryErr := w.handler.Publish(ctx, event)
+	deliveryCtx, cancelDelivery := context.WithTimeout(ctx, w.deliveryTimeout)
+	deliveryErr := w.handler.Publish(deliveryCtx, event)
+	cancelDelivery()
 	ackErr := w.repository.WithinTenant(ctx, tenantID, func(tx *store.TenantTx) error {
 		if deliveryErr == nil {
 			return tx.MarkOutboxPublished(ctx, event.ID, w.workerID)

@@ -17,14 +17,14 @@ type Handler interface {
 }
 
 type Worker struct {
-	repository  *store.Postgres
-	handler     Handler
-	workerID    string
-	lease       time.Duration
+	repository      *store.Postgres
+	handler         Handler
+	workerID        string
+	lease           time.Duration
 	deliveryTimeout time.Duration
-	maxAttempts int
-	pollEvery   time.Duration
-	logger      *slog.Logger
+	maxAttempts     int
+	pollEvery       time.Duration
+	logger          *slog.Logger
 }
 
 func NewWorker(repository *store.Postgres, handler Handler, lease, pollEvery time.Duration, maxAttempts int, logger *slog.Logger) (*Worker, error) {
@@ -42,14 +42,14 @@ func NewWorker(repository *store.Postgres, handler Handler, lease, pollEvery tim
 		logger = slog.Default()
 	}
 	return &Worker{
-		repository:  repository,
-		handler:     handler,
-		workerID:    hex.EncodeToString(randomID[:]),
-		lease:       lease,
+		repository:      repository,
+		handler:         handler,
+		workerID:        hex.EncodeToString(randomID[:]),
+		lease:           lease,
 		deliveryTimeout: lease / 2,
-		maxAttempts: maxAttempts,
-		pollEvery:   pollEvery,
-		logger:      logger,
+		maxAttempts:     maxAttempts,
+		pollEvery:       pollEvery,
+		logger:          logger,
 	}, nil
 }
 

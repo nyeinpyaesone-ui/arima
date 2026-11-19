@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"mime"
 	"strings"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
@@ -37,7 +38,8 @@ func (h *customerHandler) create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "customer service is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+	mediaType, _, mediaErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mediaErr != nil || mediaType != "application/json" {
 		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
 		return
 	}
@@ -46,6 +48,11 @@ func (h *customerHandler) create(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 	var input createCustomerRequest
 	if err := decoder.Decode(&input); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid customer request", http.StatusBadRequest)
 		return
 	}
@@ -63,7 +70,7 @@ func (h *customerHandler) create(w http.ResponseWriter, r *http.Request) {
 		}
 		correlationID = hex.EncodeToString(raw[:])
 	}
-	if len(correlationID) > 128 || strings.ContainsAny(correlationID, "\r\n") {
+	if len(correlationID) > 128 || !safeHeaderToken(correlationID) {
 		http.Error(w, "invalid request correlation ID", http.StatusBadRequest)
 		return
 	}
@@ -101,9 +108,19 @@ func (h *customerHandler) get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func safeHeaderToken(value string) bool {
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return value != ""
+}
+
 func writeCustomerError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, customer.ErrInvalidCustomer):
+	case errors.Is(err, customer.ErrInvalidCustomer), errors.Is(err, customer.ErrInvalidRequest):
 		http.Error(w, "invalid customer", http.StatusBadRequest)
 	case errors.Is(err, store.ErrInvalidTenant):
 		http.Error(w, "invalid tenant identity", http.StatusUnauthorized)

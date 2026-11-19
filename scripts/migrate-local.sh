@@ -8,30 +8,42 @@ set -eu
 : "${ARIMA_API_DB_PASSWORD:?ARIMA_API_DB_PASSWORD is required}"
 : "${ARIMA_OUTBOX_DB_PASSWORD:?ARIMA_OUTBOX_DB_PASSWORD is required}"
 
-psql -X -v ON_ERROR_STOP=1 -c "
+psql -X -v ON_ERROR_STOP=1 <<'SQL'
 CREATE TABLE IF NOT EXISTS public.arima_schema_migrations (
     version text PRIMARY KEY,
     applied_at timestamptz NOT NULL DEFAULT now()
-)"
+);
+SQL
 
 found_migration=false
 for migration in /migrations/[0-9]*.up.sql; do
     [ -f "$migration" ] || continue
     found_migration=true
     version="$(basename "$migration" .up.sql)"
-    applied="$(psql -X -A -t -v version="$version" -c "SELECT EXISTS (SELECT 1 FROM public.arima_schema_migrations WHERE version = :'version')")"
+
+    case "$version" in
+        [0-9][0-9][0-9][0-9]_[a-z0-9_]*) ;;
+        *)
+            echo "Invalid migration filename: $version" >&2
+            exit 1
+            ;;
+    esac
+
+    applied="$(psql -X -A -t -v ON_ERROR_STOP=1 -v version="$version" \
+        -c "SELECT EXISTS (SELECT 1 FROM public.arima_schema_migrations WHERE version = :'version')")"
     if [ "$applied" = "t" ]; then
         echo "Migration $version already applied; skipping."
         continue
     fi
 
-    echo "Applying migration $version."
-    psql -X -v ON_ERROR_STOP=1 -v version="$version" -v migration_path="$migration" <<'SQL'
-BEGIN;
-\i :migration_path
-INSERT INTO public.arima_schema_migrations (version) VALUES (:'version');
-COMMIT;
-SQL
+    echo "Applying migration $version from $migration."
+    {
+        printf 'BEGIN;\n'
+        cat "$migration"
+        printf "\nINSERT INTO public.arima_schema_migrations (version) VALUES (:'version');\n"
+        printf 'COMMIT;\n'
+    } | psql -X -v ON_ERROR_STOP=1 -v version="$version"
+    echo "Migration $version applied successfully."
 done
 
 if [ "$found_migration" != true ]; then

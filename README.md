@@ -28,7 +28,6 @@ Compose starts PostgreSQL, applies migrations 0001–0003 once using a migration
 
 For local Go checks, run `go mod download`, `go mod verify`, `make check`, and `go run ./cmd/erp-api`. Without a configured OIDC provider, customer routes remain inaccessible (fail closed). Provision a real development tenant membership for the exact OIDC subject before testing customer access.
 
-Without OIDC configuration, protected routes fail closed with HTTP 503; health endpoints remain available. For customer API operations, apply migrations 0001, 0002 and 0003 to a disposable development database, configure ARIMA_DATABASE_URL, and provision a tenant membership with the operator runbook.
 
 ## API routes
 
@@ -68,7 +67,7 @@ Provision roles, permissions and membership through the trusted operator process
 
 ## Outbox worker
 
-The same container image includes /erp-api and /outbox-worker. Start the worker as a separate process by overriding the image **entrypoint** to `/outbox-worker` (not merely its command). The optional local Compose overlay is `compose.worker.yaml`. It exposes internal liveness/readiness endpoints on port 8081; readiness checks the worker database connection only, not webhook delivery.
+The same container image includes `/erp-api` and `/outbox-worker`. Start the worker as a separate process by overriding the image **entrypoint** to `/outbox-worker` (not merely its command). The optional local Compose overlay is `compose.worker.yaml`. For local use, add a real HTTPS receiver URL and token to ignored `.env`, then run `make dev-worker`. Never run it with sample placeholder values. It exposes internal liveness/readiness endpoints on port 8081; readiness checks the worker database connection only, not webhook delivery.
 
 Required worker environment:
 

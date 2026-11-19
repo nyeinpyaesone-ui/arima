@@ -55,7 +55,7 @@ Configure both OIDC variables or neither outside production. Production startup 
 | `ARIMA_OUTBOX_WEBHOOK_TOKEN` | yes | Bearer credential for the receiver; store in a secret manager |
 | `ARIMA_OUTBOX_HEALTH_ADDR` | no | Health listener; default `:8081` |
 
-The worker process is `/outbox-worker`; the API process is `/erp-api`. They use separate database credentials and process health endpoints. The webhook must authenticate the bearer token, durably accept the event, deduplicate using `Idempotency-Key` and `X-ARIMA-Event-ID`, and return 2xx only after durable acceptance. Delivery is at-least-once. HTTP 429/5xx responses are retried; permanent rejections are dead-lettered. Never log tokens or full customer/event payloads.
+The worker process is `/outbox-worker`; the API process is `/erp-api`. The worker must be launched by overriding the image entrypoint, not by adding `/outbox-worker` as an argument to the API entrypoint. They use separate database credentials and process health endpoints. The webhook must authenticate the bearer token, durably accept the event, deduplicate using `Idempotency-Key` and `X-ARIMA-Event-ID`, and return 2xx only after durable acceptance. Delivery is at-least-once. HTTP 429/5xx responses are retried; permanent rejections are dead-lettered. Never log tokens or full customer/event payloads.
 
 ## OIDC and authorization
 
@@ -67,7 +67,7 @@ No real identity provider has been configured in this repository. Before product
 
 ## PostgreSQL roles and migrations
 
-Apply migrations 0001, 0002 and 0003 in order with a dedicated migration identity. The API never applies DDL during startup.
+Apply migrations 0001, 0002 and 0003 in order with a dedicated migration identity. The API never applies DDL during startup. For local development, `make dev-up` runs them through the Compose migration service and records applied versions in the local `arima_schema_migrations` ledger.
 
 The API runtime identity must be `NOSUPERUSER NOBYPASSRLS` and receive only:
 - SELECT/INSERT/UPDATE on `tenant_records` and `idempotency_keys`.
@@ -75,9 +75,9 @@ The API runtime identity must be `NOSUPERUSER NOBYPASSRLS` and receive only:
 - SELECT/INSERT on `outbox_events`.
 - SELECT on `tenant_roles`, `tenant_role_permissions` and `tenant_memberships`.
 
-The worker identity must be `NOSUPERUSER NOBYPASSRLS) and receive only SELECT on `tenants`, plus SELECT/UPDATE on `outbox_events`. It must not read business records or tenant membership tables. The Compose role-grant script is strictly for local development and must not be used as a production provisioning mechanism.
+The worker identity must be `NOSUPERUSER NOBYPASSRLS` and receive only SELECT on `tenants`, plus SELECT/UPDATE on `outbox_events`. It must not read business records or tenant membership tables. The Compose role-grant script is strictly for local development and must not be used as a production provisioning mechanism.
 
-Production PostgreSQL URLs must use TLS certificate and hostname verification (`sslmode=verify-full`). Do not use `sslmode=disable` or `require` for production. Store migration, API and worker credentials separately in the deployment platform's secret manager. Verify effective grants and forced RLS against the actual staging database before exposing the service.
+Production PostgreSQL URLs for both API and worker must use TLS certificate and hostname verification (`sslmode=verify-full`). Do not use `sslmode=disable` or `require` for production. Store migration, API and worker credentials separately in the deployment platform's secret manager. Verify effective grants and forced RLS against the actual staging database before exposing the service.
 
 ## Production deployment rules
 

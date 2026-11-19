@@ -4,8 +4,8 @@ import "testing"
 
 func TestValidateProductionDSN(t *testing.T) {
 	tests := []struct {
-		name string
-		dsn  string
+		name    string
+		dsn     string
 		wantErr bool
 	}{
 		{name: "verified TLS", dsn: "postgres://arima@db.example.test:5432/arima?sslmode=verify-full"},

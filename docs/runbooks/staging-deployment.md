@@ -34,7 +34,7 @@ The provider's own secret manager must supply these values to the corresponding 
 - Secret `ARIMA_OUTBOX_WEBHOOK_URL`: durable HTTPS receiver endpoint.
 - Secret `ARIMA_OUTBOX_WEBHOOK_TOKEN`: bearer token accepted by that receiver.
 
-Do not reuse migration credentials for either process. API and worker roles must be `NOSUPERUSER NOBYPASSRLS). Keep webhook credentials out of the API container. Keep worker port 8081 private; only the API needs public ingress.
+Do not reuse migration credentials for either process. API and worker roles must be `NOSUPERUSER NOBYPASSRLS`. Keep webhook credentials out of the API container. Keep worker port 8081 private; only the API needs public ingress.
 
 ## Adapter contract — mandatory before dispatch
 

@@ -93,7 +93,7 @@ func (t *TenantTx) FailOutbox(ctx context.Context, eventID, workerID, errorCode 
 	if errorCode == "" {
 		errorCode = "delivery_failed"
 	}
-	if len(errorCode) > 100 || maxAttempts < 1 {
+	if !safeOutboxErrorCode(errorCode) || maxAttempts < 1 {
 		return false, errors.New("valid error code and positive max attempts are required")
 	}
 	var deadLetter bool
@@ -118,4 +118,18 @@ RETURNING status = 'dead_letter'
 		return false, fmt.Errorf("record outbox delivery failure: %w", err)
 	}
 	return deadLetter, nil
+}
+
+func safeOutboxErrorCode(value string) bool {
+	if value == "" || len(value) > 100 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }

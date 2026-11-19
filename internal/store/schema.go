@@ -68,3 +68,45 @@ WHERE table_schema = 'public'
 	}
 	return nil
 }
+
+ 
+// VerifyOutboxWorkerSchema checks only the objects required by the restricted
+// worker identity. It intentionally does not require access to business or
+// tenant-authorization tables.
+func VerifyOutboxWorkerSchema(ctx context.Context, db *sql.DB) error {
+	if db == nil {
+		return errors.New("database connection is required")
+	}
+	const query = `
+SELECT
+    to_regclass('public.tenants') IS NOT NULL
+    AND to_regclass('public.outbox_events') IS NOT NULL
+    AND COALESCE((
+        SELECT relrowsecurity AND relforcerowsecurity
+        FROM pg_class
+        WHERE oid = to_regclass('public.outbox_events')
+    ), false)
+    AND EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'outbox_events'
+          AND policyname = 'tenant_isolation'
+          AND qual IS NOT NULL
+          AND with_check IS NOT NULL
+    )
+    AND (
+        SELECT count(*) = 2
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'outbox_events'
+          AND column_name IN ('lease_owner', 'lease_until')
+    )`
+	var ready bool
+	if err := db.QueryRowContext(ctx, query).Scan(&ready); err != nil {
+		return fmt.Errorf("verify outbox worker schema: %w", err)
+	}
+	if !ready {
+		return errors.New("outbox worker schema is not ready; apply reviewed migrations 0001 and 0002")
+	}
+	return nil
+}

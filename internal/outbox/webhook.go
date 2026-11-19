@@ -27,7 +27,7 @@ type webhookEnvelope struct {
 	AggregateType string          `json:"aggregate_type"`
 	AggregateID   string          `json:"aggregate_id"`
 	EventType     string          `json:"event_type"`
-	OccurredAt    time.Time       `json:"occurred_at"`
+	CreatedAt     time.Time       `json:"created_at"`
 	Payload       json.RawMessage `json:"payload"`
 }
 
@@ -37,6 +37,7 @@ type deliveryError struct {
 
 func (e deliveryError) Error() string { return "outbox webhook delivery failed: " + e.code }
 func (e deliveryError) Code() string  { return e.code }
+func (e deliveryError) Permanent() bool { return e.code == "webhook_rejected" || e.code == "event_too_large" }
 
 // NewHTTPSWebhookHandler constructs an authenticated HTTPS publisher. Redirects
 // are disabled so bearer credentials cannot be forwarded to another host.
@@ -69,7 +70,7 @@ func (h *HTTPSWebhookHandler) Publish(ctx context.Context, event store.OutboxEve
 	envelope := webhookEnvelope{
 		ID: event.ID, TenantID: event.TenantID, AggregateType: event.AggregateType,
 		AggregateID: event.AggregateID, EventType: event.EventType,
-		OccurredAt: time.Now().UTC(), Payload: event.Payload,
+		CreatedAt: event.CreatedAt, Payload: event.Payload,
 	}
 	body, err := json.Marshal(envelope)
 	if err != nil {

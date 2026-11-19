@@ -47,7 +47,7 @@ Grant only the required permissions. Avoid assigning customer.write to read-only
 
 ## Runtime grants
 
-The API runtime role needs SELECT on tenant_roles, tenant_role_permissions, and tenant_memberships, plus only required DML on tenant business, audit, idempotency and outbox tables. The separate outbox-worker role needs SELECT on tenants and SELECT/UPDATE on outbox_events only. Both runtime roles must be NOSUPERUSER NOBYPASSRLS. Never grant either runtime role authorization-table write privileges or membership administration rights.
+The API runtime role needs SELECT on tenant_roles, tenant_role_permissions, and tenant_memberships; SELECT/INSERT/UPDATE on tenant_records and idempotency_keys; INSERT on audit_events; and SELECT/INSERT on outbox_events (PostgreSQL requires SELECT for the returned event ID). It must not receive UPDATE on outbox_events. The separate outbox-worker role needs SELECT on tenants and SELECT/UPDATE on outbox_events only. Both runtime roles must be NOSUPERUSER NOBYPASSRLS. Never grant either runtime role authorization-table write privileges or membership administration rights.
 
 Verify effective grants and role attributes from the actual staging database using catalog queries before exposure. Also verify each RLS table has relrowsecurity=true, relforcerowsecurity=true, and a tenant-isolation policy with both USING and WITH CHECK.
 

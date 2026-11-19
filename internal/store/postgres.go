@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	ErrPermissionDenied     = errors.New("permission denied")
+	ErrPermissionDenied    = errors.New("permission denied")
 	ErrInvalidTenant       = errors.New("tenant ID is required")
 	ErrVersionConflict     = errors.New("record version conflict")
 	ErrIdempotencyConflict = errors.New("idempotency key reused with a different request")
@@ -86,7 +86,6 @@ func (p *Postgres) WithinTenant(ctx context.Context, tenantID string, fn func(*T
 	}
 	return nil
 }
-
 
 // RequirePermission evaluates a tenant membership and role grant inside the
 // caller's existing business transaction. This prevents authorization from

@@ -19,7 +19,10 @@ SELECT
 	AND to_regclass('public.tenant_records') IS NOT NULL
 	AND to_regclass('public.audit_events') IS NOT NULL
 	AND to_regclass('public.idempotency_keys') IS NOT NULL
-	AND to_regclass('public.outbox_events') IS NOT NULL`
+	AND to_regclass('public.outbox_events') IS NOT NULL
+	AND to_regclass('public.tenant_roles') IS NOT NULL
+	AND to_regclass('public.tenant_role_permissions') IS NOT NULL
+	AND to_regclass('public.tenant_memberships') IS NOT NULL`
 	var tablesReady bool
 	if err := db.QueryRowContext(ctx, tablesQuery).Scan(&tablesReady); err != nil {
 		return fmt.Errorf("verify PostgreSQL schema: %w", err)
@@ -28,11 +31,11 @@ SELECT
 		return errors.New("required ARIMA tables are missing; apply reviewed migrations before startup")
 	}
 	const rlsQuery = `
-SELECT count(*) = 4
+SELECT count(*) = 7
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public'
-  AND c.relname IN ('tenant_records', 'audit_events', 'idempotency_keys', 'outbox_events')
+  AND c.relname IN ('tenant_records', 'audit_events', 'idempotency_keys', 'outbox_events', 'tenant_roles', 'tenant_role_permissions', 'tenant_memberships')
   AND c.relrowsecurity
   AND c.relforcerowsecurity
   AND EXISTS (

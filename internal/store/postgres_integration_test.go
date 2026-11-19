@@ -57,8 +57,7 @@ VALUES
  ('22222222-2222-4222-8222-222222222222', 'operator', 'Operator')
 ON CONFLICT DO NOTHING;
 INSERT INTO tenant_role_permissions (tenant_id, role_key, permission)
-VALUES ('11111111-1111-4111-8111-111111111111', 'operator', 'customer.read'),
-       ('11111111-1111-4111-8111-111111111111', 'operator', 'customer.write')
+VALUES ('11111111-1111-4111-8111-111111111111', 'operator', 'customer.read')
 ON CONFLICT DO NOTHING;
 INSERT INTO tenant_memberships (tenant_id, subject, role_key, status)
 VALUES

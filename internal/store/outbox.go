@@ -19,6 +19,7 @@ type OutboxEvent struct {
 	EventType     string
 	Payload       []byte
 	Attempts      int
+	CreatedAt     time.Time
 }
 
 // ClaimOutbox atomically leases one event. The lease is committed before delivery,
@@ -51,10 +52,10 @@ FROM candidate
 WHERE event.tenant_id = candidate.tenant_id
   AND event.id = candidate.id
 RETURNING event.id::text, event.tenant_id::text, event.aggregate_type,
-          event.aggregate_id, event.event_type, event.payload, event.attempts
+          event.aggregate_id, event.event_type, event.payload, event.attempts, event.created_at
 `, t.tenantID, workerID, lease.Seconds()).Scan(
 		&event.ID, &event.TenantID, &event.AggregateType, &event.AggregateID,
-		&event.EventType, &event.Payload, &event.Attempts,
+		&event.EventType, &event.Payload, &event.Attempts, &event.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OutboxEvent{}, ErrNoOutboxEvent

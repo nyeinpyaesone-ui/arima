@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
 	"mime"
+	"net/http"
 	"strings"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"

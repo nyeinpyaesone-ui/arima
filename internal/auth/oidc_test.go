@@ -41,3 +41,16 @@ func TestNewOIDCVerifierRejectsMissingConfiguration(t *testing.T) {
 		t.Fatal("expected missing audience to be rejected")
 	}
 }
+
+func TestNewOIDCVerifierRejectsInsecureIssuerBeforeDiscovery(t *testing.T) {
+	for _, issuer := range []string{
+		"http://issuer.example.test",
+		"https://user:password@issuer.example.test",
+		"https://issuer.example.test?tenant=unsafe",
+		"https://issuer.example.test#fragment",
+	} {
+		if _, err := NewOIDCVerifier(context.Background(), issuer, "arima-api"); err == nil {
+			t.Fatalf("expected insecure issuer %q to be rejected", issuer)
+		}
+	}
+}

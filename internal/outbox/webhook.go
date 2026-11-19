@@ -37,7 +37,9 @@ type deliveryError struct {
 
 func (e deliveryError) Error() string { return "outbox webhook delivery failed: " + e.code }
 func (e deliveryError) Code() string  { return e.code }
-func (e deliveryError) Permanent() bool { return e.code == "webhook_rejected" || e.code == "event_too_large" }
+func (e deliveryError) Permanent() bool {
+	return e.code == "webhook_rejected" || e.code == "event_too_large"
+}
 
 // NewHTTPSWebhookHandler constructs an authenticated HTTPS publisher. Redirects
 // are disabled so bearer credentials cannot be forwarded to another host.

@@ -57,7 +57,7 @@ GRANT CONNECT ON DATABASE arima_customer_test TO arima_customer_runtime;
 GRANT USAGE ON SCHEMA public TO arima_customer_runtime;
 GRANT SELECT, INSERT, UPDATE ON tenant_records, idempotency_keys TO arima_customer_runtime;
 GRANT SELECT, INSERT ON audit_events TO arima_customer_runtime;
-GRANT INSERT ON outbox_events TO arima_customer_runtime;
+GRANT SELECT, INSERT ON outbox_events TO arima_customer_runtime;
 GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO arima_customer_runtime;`)
 	if err != nil {
 		t.Fatalf("provision restricted customer runtime role: %v", err)

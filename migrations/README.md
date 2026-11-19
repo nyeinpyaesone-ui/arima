@@ -13,6 +13,7 @@ Apply in order to a disposable/test database, then a reviewed staging environmen
 ```sh
 psql "$ARIMA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0001_tenant_foundation.up.sql
 psql "$ARIMA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0002_outbox_leases.up.sql
+psql "$ARIMA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0003_tenant_authorization.up.sql
 ```
 
 Use a dedicated migration role with the privileges needed to create the extension and schema. The runtime role must be separate and least-privileged, must not be a superuser, and must not have `BYPASSRLS`. Grant only the table operations required by the deployed application and worker. Verify actual grants and RLS behavior under the runtime role before production.

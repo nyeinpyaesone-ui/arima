@@ -49,6 +49,12 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: psql "$ARIMA_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE arima_customer_test"
+      - name: Validate local Compose and bootstrap scripts
+        run: |
+          sh -n scripts/migrate-local.sh
+          bash -n scripts/env-preflight.sh
+          docker compose --env-file configs/arima.env.example config --quiet
+          docker compose --env-file configs/arima.env.example --env-file configs/arima.worker.env.example -f compose.yaml -f compose.worker.yaml config --quiet
       - name: Lint GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
       - name: Verify module integrity and pinned graph

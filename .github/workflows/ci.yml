@@ -33,6 +33,7 @@ jobs:
       ARIMA_TEST_RUNTIME_DATABASE_URL: postgres://arima_runtime:arima_test_password@localhost:5432/arima_test?sslmode=disable
       ARIMA_CUSTOMER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/arima_customer_test?sslmode=disable
       ARIMA_CUSTOMER_TEST_RUNTIME_DATABASE_URL: postgres://arima_customer_runtime:arima_customer_test_password@localhost:5432/arima_customer_test?sslmode=disable
+      ARIMA_CUSTOMER_TEST_WORKER_DATABASE_URL: postgres://arima_outbox_runtime:arima_outbox_test_password@localhost:5432/arima_customer_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
         with:

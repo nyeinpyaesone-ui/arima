@@ -57,7 +57,7 @@ The Environment Setup Preflight checks configuration presence/syntax and code-le
 
 ## Missing essentials before production use
 
-1. A real OIDC provider integration test suite and tenant-membership authorization policy.
+1. A real OIDC provider integration test suite and trusted operator workflow for provisioning tenant roles/memberships.
 2. Business services/routes with atomic mutation + audit + idempotency + outbox behavior.
 3. A concrete idempotent outbox publisher, trusted tenant scheduler, timeout policy, metrics and alerts.
 4. Staging verification of actual runtime/migration/worker grants, RLS, migrations, backup and restore.

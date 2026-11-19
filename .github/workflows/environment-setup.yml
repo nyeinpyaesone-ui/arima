@@ -1,0 +1,87 @@
+name: Environment Setup Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Environment to validate (this workflow does not deploy)
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+        default: development
+
+permissions:
+  contents: read
+
+concurrency:
+  group: env-preflight-${{ inputs.target }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    # Environment configuration is only read from the trusted main branch.
+    # Feature branches are covered by normal pull-request CI.
+    if: github.ref == 'refs/heads/main'
+    name: Validate ${{ inputs.target }} environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.target }}
+    env:
+      TARGET_ENV: ${{ inputs.target }}
+    steps:
+      - name: Checkout trusted main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+          cache: true
+      - name: Validate planned OIDC configuration
+        if: inputs.target != 'development'
+        env:
+          ARIMA_OIDC_ISSUER: ${{ vars.ARIMA_OIDC_ISSUER }}
+          ARIMA_OIDC_AUDIENCE: ${{ vars.ARIMA_OIDC_AUDIENCE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ARIMA_OIDC_ISSUER" || {
+            echo "::error::Configure environment variable ARIMA_OIDC_ISSUER in GitHub Environment '$TARGET_ENV'."
+            exit 1
+          }
+          test -n "$ARIMA_OIDC_AUDIENCE" || {
+            echo "::error::Configure environment variable ARIMA_OIDC_AUDIENCE in GitHub Environment '$TARGET_ENV'."
+            exit 1
+          }
+          case "$ARIMA_OIDC_ISSUER" in
+            https://*) ;;
+            *) echo "::error::ARIMA_OIDC_ISSUER must use HTTPS."; exit 1 ;;
+          esac
+          echo "Planned OIDC values are present and issuer syntax is HTTPS; runtime OIDC enforcement is not implemented by this scaffold."
+      - name: Check workflow syntax
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+      - name: Verify module graph is clean
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Check formatting
+        shell: bash
+        run: |
+          files="$(gofmt -l ./cmd ./internal)"
+          if [[ -n "$files" ]]; then printf 'Go files need gofmt:\n%s\n' "$files"; exit 1; fi
+      - name: Vet
+        run: go vet ./...
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - name: Test with race detector
+        run: go test -race ./...
+      - name: Build Linux binary
+        run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o /tmp/arima-api ./cmd/erp-api
+      - name: Deployment boundary
+        run: |
+          echo "Preflight completed. No deployment, migration, or release was performed."
+          echo "ARIMA_DATABASE_URL is not required because this scaffold does not implement persistence or migrations."
+          echo "Production promotion requires an independently approved deployment target and rollout/rollback procedure."

@@ -224,7 +224,7 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 		if _, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() + interval '1 hour' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, deadLetterID); err != nil {
 			return err
 		}
-		if _, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() - interval '1 second' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, leaseRecoveryID); err != nil {
+		if _, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() + interval '1 hour' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, leaseRecoveryID); err != nil {
 			return err
 		}
 		result, err := tx.BeginIdempotency(ctx, "request-key-0001", []byte(`{"action":"update","id":"customer-1"}`), time.Hour)
@@ -291,7 +291,7 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 		t.Fatalf("claim initial lease: %v", err)
 	}
 	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
-		_, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET lease_until = now() - interval '1 second' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, leaseRecoveryID)
+		_, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() - interval '1 second', lease_until = now() - interval '1 second' WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, leaseRecoveryID)
 		return err
 	})
 	if err != nil {

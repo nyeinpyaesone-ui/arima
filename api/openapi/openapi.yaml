@@ -4,8 +4,7 @@ info:
   version: 0.1.0
   description: >
     Contract-first tenant-scoped ERP and AI integration boundary.
-    Implemented routes are health probes and GET /api/v1/me. Other resource/action
-    routes below remain planned contracts and are not implemented by the executable.
+    Implemented routes are health probes, GET /api/v1/me, and tenant-authorized customer create/read operations. Resource/action routes below remain planned contracts.
 servers:
   - url: /
 security:
@@ -53,6 +52,58 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '503':
           description: Authentication verifier is not configured
+  /api/v1/customers:
+    post:
+      operationId: createCustomer
+      summary: Create a customer within the authenticated tenant
+      description: Requires customer.write permission. The customer record, audit event, idempotency response and outbox event are committed atomically. Replays with the same key and payload return the original result.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 200 }
+        - in: header
+          name: X-Request-ID
+          required: false
+          schema: { type: string, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerCreate' }
+      responses:
+        '201':
+          description: Customer created or idempotent replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '400': { description: Invalid request or customer data }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: Request body exceeds 64 KiB }
+        '415': { description: Content-Type must be application/json }
+        '503': { description: Customer service is not configured }
+  /api/v1/customers/{externalID}:
+    get:
+      operationId: getCustomer
+      summary: Read a customer within the authenticated tenant
+      description: Requires customer.read permission. Tenant context is derived from the verified token and enforced again by PostgreSQL RLS.
+      parameters:
+        - in: path
+          name: externalID
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        '200':
+          description: Customer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Customer service is not configured }
   /v1/resources/{type}/{id}:
     get:
       operationId: getResource
@@ -202,6 +253,28 @@ components:
         version: { type: string }
         data: { type: object, additionalProperties: true }
         updated_at: { type: string, format: date-time }
+    CustomerCreate:
+      type: object
+      additionalProperties: false
+      required: [external_id, name]
+      properties:
+        external_id: { type: string, minLength: 1, maxLength: 200 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        phone: { type: string, maxLength: 50 }
+        email: { type: string, maxLength: 254 }
+        notes: { type: string, maxLength: 2000 }
+    Customer:
+      type: object
+      required: [id, tenant_id, external_id, name, version]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        external_id: { type: string }
+        name: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        notes: { type: string }
+        version: { type: integer, minimum: 1 }
     ActionInput:
       type: object
       required: [action_type, resource_type, resource_id, expected_version, payload, rationale]

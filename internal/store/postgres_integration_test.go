@@ -34,12 +34,14 @@ func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../migrations/0001_tenant_foundation.up.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
-		t.Fatalf("apply tenant migration to isolated test database: %v", err)
+	for _, migrationName := range []string{"0001_tenant_foundation.up.sql", "0002_outbox_leases.up.sql"} {
+		migration, err := os.ReadFile("../../migrations/" + migrationName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+			t.Fatalf("apply %s to isolated test database: %v", migrationName, err)
+		}
 	}
 	if err := VerifySchema(ctx, db); err != nil {
 		t.Fatalf("verify migrated schema and forced tenant RLS: %v", err)
@@ -82,6 +84,7 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 	}
 
 	var recordID string
+	var outboxID string
 	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
 		record, err := tx.UpsertRecord(ctx, "customer", "customer-1", 0, json.RawMessage(`{"name":"Tenant A"}`))
 		if err != nil {
@@ -104,7 +107,8 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 		if err := tx.AppendAudit(ctx, "user-1", "customer.updated", "customer", recordID, "succeeded", "correlation-1", json.RawMessage(`{"test":true}`)); err != nil {
 			return err
 		}
-		if _, err := tx.EnqueueOutbox(ctx, "customer", recordID, "customer.updated", json.RawMessage(`{"record_id":"`+recordID+`"}`)); err != nil {
+		outboxID, err = tx.EnqueueOutbox(ctx, "customer", recordID, "customer.updated", json.RawMessage(`{"record_id":"`+recordID+`"}`))
+		if err != nil {
 			return err
 		}
 		result, err := tx.BeginIdempotency(ctx, "request-key-0001", []byte(`{"action":"update","id":"customer-1"}`), time.Hour)
@@ -115,6 +119,29 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 			t.Fatal("first idempotency reservation should be new")
 		}
 		return tx.CompleteIdempotency(ctx, "request-key-0001", 200, json.RawMessage(`{"accepted":true}`))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
+		event, err := tx.ClaimOutbox(ctx, "integration-worker", time.Minute)
+		if err != nil {
+			return err
+		}
+		if event.ID != outboxID || event.Attempts != 1 || event.TenantID != tenantA {
+			t.Fatalf("unexpected claimed outbox event: %#v", event)
+		}
+		return tx.MarkOutboxPublished(ctx, event.ID, "integration-worker")
+	})
+	if err != nil {
+		t.Fatalf("claim and acknowledge outbox event: %v", err)
+	}
+	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
+		if _, err := tx.ClaimOutbox(ctx, "integration-worker-2", time.Minute); !errors.Is(err, ErrNoOutboxEvent) {
+			t.Fatalf("published event must not be claimed again, got %v", err)
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)

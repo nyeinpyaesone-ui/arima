@@ -7,27 +7,26 @@ import (
 	"fmt"
 )
 
-// VerifySchema checks the reviewed migration's required tables and tenant RLS
-// controls without applying DDL. Schema changes remain a separate deployment step.
+// VerifySchema checks required tables, forced tenant RLS policies and outbox
+// lease metadata without applying DDL. Schema changes remain a deployment step.
 func VerifySchema(ctx context.Context, db *sql.DB) error {
 	if db == nil {
 		return errors.New("database connection is required")
 	}
-	const query = `
+	const tablesQuery = `
 SELECT
 	to_regclass('public.tenants') IS NOT NULL
 	AND to_regclass('public.tenant_records') IS NOT NULL
 	AND to_regclass('public.audit_events') IS NOT NULL
 	AND to_regclass('public.idempotency_keys') IS NOT NULL
 	AND to_regclass('public.outbox_events') IS NOT NULL`
-	var ready bool
-	if err := db.QueryRowContext(ctx, query).Scan(&ready); err != nil {
+	var tablesReady bool
+	if err := db.QueryRowContext(ctx, tablesQuery).Scan(&tablesReady); err != nil {
 		return fmt.Errorf("verify PostgreSQL schema: %w", err)
 	}
-	if !ready {
+	if !tablesReady {
 		return errors.New("required ARIMA tables are missing; apply reviewed migrations before startup")
 	}
-
 	const rlsQuery = `
 SELECT count(*) = 4
 FROM pg_class c
@@ -50,6 +49,19 @@ WHERE n.nspname = 'public'
 	}
 	if !rlsReady {
 		return errors.New("tenant isolation is not production-ready: all tenant tables must have ENABLE and FORCE ROW LEVEL SECURITY plus tenant_isolation USING/WITH CHECK policy")
+	}
+	const leaseQuery = `
+SELECT count(*) = 2
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'outbox_events'
+  AND column_name IN ('lease_owner', 'lease_until')`
+	var leaseReady bool
+	if err := db.QueryRowContext(ctx, leaseQuery).Scan(&leaseReady); err != nil {
+		return fmt.Errorf("verify outbox lease schema: %w", err)
+	}
+	if !leaseReady {
+		return errors.New("outbox lease schema is missing; apply migration 0002_outbox_leases")
 	}
 	return nil
 }

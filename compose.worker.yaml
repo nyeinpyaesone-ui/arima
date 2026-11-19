@@ -9,7 +9,7 @@ services:
         condition: service_completed_successfully
     environment:
       ARIMA_ENV: ${ARIMA_ENV:-development}
-      ARIMA_OUTBOX_DATABASE_URL: ${ARIMA_OUTBOX_DATABASE_URL:?Set ARIMA_OUTBOX_DATABASE_URL in .env}
+      ARIMA_OUTBOX_DATABASE_URL: ${ARIMA_OUTBOX_DATABASE_URL:-postgres://arima_outbox:${ARIMA_OUTBOX_DB_PASSWORD:-local-outbox-password}@database:5432/${POSTGRES_DB:-arima_dev}?sslmode=disable}
       ARIMA_OUTBOX_WEBHOOK_URL: ${ARIMA_OUTBOX_WEBHOOK_URL:?Set an HTTPS ARIMA_OUTBOX_WEBHOOK_URL in .env}
       ARIMA_OUTBOX_WEBHOOK_TOKEN: ${ARIMA_OUTBOX_WEBHOOK_TOKEN:?Set ARIMA_OUTBOX_WEBHOOK_TOKEN in .env}
       ARIMA_OUTBOX_HEALTH_ADDR: ":8081"

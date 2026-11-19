@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
+	"github.com/nyeinpyaesone-ui/arima/internal/customer"
 )
 
 type healthResponse struct {
@@ -32,10 +33,16 @@ func NewWithVerifier(verifier auth.TokenVerifier) http.Handler {
 
 // NewWithDependencies injects a dependency readiness check without coupling transport to storage.
 func NewWithDependencies(verifier auth.TokenVerifier, readiness func(context.Context) error) http.Handler {
+	return NewWithCustomerService(verifier, readiness, nil)
+}
+
+// NewWithCustomerService wires customer routes to the authenticated API boundary.
+func NewWithCustomerService(verifier auth.TokenVerifier, readiness func(context.Context) error, customers *customer.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health("live"))
 	mux.HandleFunc("GET /health/ready", readinessHandler(readiness))
 	mux.Handle("GET /api/v1/me", auth.RequireBearer(verifier, http.HandlerFunc(currentIdentity)))
+	registerCustomerRoutes(mux, verifier, customers)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)

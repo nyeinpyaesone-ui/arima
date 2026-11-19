@@ -85,6 +85,31 @@ func TestProtectedIdentityRouteRequiresValidBearer(t *testing.T) {
 	}
 }
 
+func TestCustomerRoutesRequireBearerAndConfiguredService(t *testing.T) {
+	handler := NewWithCustomerService(testVerifier{}, nil, nil)
+	for _, tc := range []struct {
+		name, path, method, token string
+		want int
+	}{
+		{name: "create requires bearer", path: "/api/v1/customers", method: http.MethodPost, want: http.StatusUnauthorized},
+		{name: "read requires bearer", path: "/api/v1/customers/customer-1", method: http.MethodGet, want: http.StatusUnauthorized},
+		{name: "create unavailable without service", path: "/api/v1/customers", method: http.MethodPost, token: "valid-test-token", want: http.StatusUnsupportedMediaType},
+		{name: "read unavailable without service", path: "/api/v1/customers/customer-1", method: http.MethodGet, token: "valid-test-token", want: http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestUnknownPathIsNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	New().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing", nil))

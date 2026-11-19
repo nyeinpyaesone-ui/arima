@@ -30,6 +30,7 @@ jobs:
           context: .
           push: false
           tags: arima-local:validation
+          platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -56,5 +57,8 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          platforms: linux/amd64,linux/arm64
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max

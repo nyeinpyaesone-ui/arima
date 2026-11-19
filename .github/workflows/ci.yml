@@ -52,6 +52,38 @@ jobs:
           bash -n scripts/env-preflight.sh
           docker compose --env-file configs/arima.env.example config --quiet
           docker compose --env-file configs/arima.env.example --env-file configs/arima.worker.env.example -f compose.yaml -f compose.worker.yaml config --quiet
+      - name: Smoke-test local Compose API and worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file configs/arima.env.example --env-file configs/arima.worker.env.example --project-name arima-ci -f compose.yaml -f compose.worker.yaml)
+          cleanup() {
+            "${compose[@]}" down --volumes --remove-orphans
+          }
+          trap cleanup EXIT
+
+          POSTGRES_PORT=55432 ARIMA_HTTP_PORT=18080 ARIMA_OUTBOX_HEALTH_PORT=18081 \
+            "${compose[@]}" up --build -d api outbox-worker
+
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/health/ready >/dev/null &&
+              curl --fail --silent --show-error http://127.0.0.1:18081/health/ready >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" == 45 ]]; then
+              "${compose[@]}" logs --no-color
+              echo "::error::Local Compose services did not become ready."
+              exit 1
+            fi
+            sleep 2
+          done
+
+          applied_migrations="$("${compose[@]}" exec -T database psql -U postgres -d arima_dev -Atc 'SELECT count(*) FROM arima_schema_migrations')"
+          test "$applied_migrations" = "3"
+          restricted_roles="$("${compose[@]}" exec -T database psql -U postgres -d arima_dev -Atc "SELECT bool_and(NOT rolsuper AND NOT rolbypassrls) FROM pg_roles WHERE rolname IN ('arima_api','arima_outbox')")"
+          test "$restricted_roles" = "t"
+          worker_business_access="$("${compose[@]}" exec -T database psql -U postgres -d arima_dev -Atc "SELECT has_table_privilege('arima_outbox','tenant_records','SELECT')")"
+          test "$worker_business_access" = "f"
       - name: Lint GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
       - name: Verify module integrity and pinned graph

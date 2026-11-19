@@ -121,6 +121,26 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 	if err := authorizer.Authorize(ctx, auth.Principal{Subject: "user-a", TenantID: tenantA}, "customer.write"); !errors.Is(err, auth.ErrPermissionDenied) {
 		t.Fatalf("ungranted permission must be denied: %v", err)
 	}
+
+	if err := repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
+		if err := tx.RequirePermission(ctx, "user-a", "customer.read"); err != nil {
+			return err
+		}
+		if err := tx.RequirePermission(ctx, "user-a", "customer.write"); !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("ungranted permission in mutation transaction must be denied: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("transactional permission check: %v", err)
+	}
+	if err := repo.WithinTenant(ctx, tenantB, func(tx *TenantTx) error {
+		if err := tx.RequirePermission(ctx, "user-a", "customer.read"); !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("suspended membership must be denied inside transaction: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("tenant B permission check: %v", err)
+	}
 	if err := repo.WithinTenant(ctx, "not-a-uuid", func(*TenantTx) error { return nil }); !errors.Is(err, ErrInvalidTenant) {
 		t.Fatalf("invalid tenant ID should be rejected before opening a transaction, got %v", err)
 	}

@@ -1,4 +1,6 @@
 -- Add recoverable leases for concurrent outbox workers.
+-- Normalize legacy processing rows so they can be safely reclaimed after upgrade.
+UPDATE outbox_events SET status = 'pending' WHERE status = 'processing';
 ALTER TABLE outbox_events
     ADD COLUMN lease_owner text,
     ADD COLUMN lease_until timestamptz;

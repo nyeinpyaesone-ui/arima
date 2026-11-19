@@ -12,7 +12,10 @@ import (
 	"github.com/nyeinpyaesone-ui/arima/internal/store"
 )
 
-var ErrInvalidCustomer = errors.New("invalid customer")
+var (
+	ErrInvalidCustomer = errors.New("invalid customer")
+	ErrInvalidRequest  = errors.New("invalid customer request metadata")
+)
 
 type Customer struct {
 	ID         string `json:"id"`
@@ -48,8 +51,10 @@ func (s *Service) Create(ctx context.Context, principal auth.Principal, idempote
 		len(input.Phone) > 50 || len(input.Email) > 254 || len(input.Notes) > 2000 {
 		return Customer{}, ErrInvalidCustomer
 	}
-	if len(strings.TrimSpace(idempotencyKey)) < 8 || len(idempotencyKey) > 200 || strings.TrimSpace(correlationID) == "" {
-		return Customer{}, errors.New("idempotency key and correlation ID are required")
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	correlationID = strings.TrimSpace(correlationID)
+	if len(idempotencyKey) < 8 || len(idempotencyKey) > 200 || correlationID == "" || len(correlationID) > 128 || strings.ContainsAny(correlationID, "\r\n") {
+		return Customer{}, ErrInvalidRequest
 	}
 	payload, err := json.Marshal(input)
 	if err != nil {

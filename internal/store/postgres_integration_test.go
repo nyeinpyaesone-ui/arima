@@ -143,8 +143,8 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 		t.Fatalf("claim and acknowledge outbox event: %v", err)
 	}
 	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
-		if _, err := tx.ClaimOutbox(ctx, "integration-worker-2", time.Minute); !errors.Is(err, ErrNoOutboxEvent) {
-			t.Fatalf("published event must not be claimed again, got %v", err)
+		if _, err := tx.tx.ExecContext(ctx, "UPDATE outbox_events SET available_at = now() WHERE tenant_id = $1::uuid AND id = $2::uuid", tenantA, deadLetterID); err != nil {
+			return err
 		}
 		event, err := tx.ClaimOutbox(ctx, "integration-worker-2", time.Minute)
 		if err != nil {
@@ -159,6 +159,15 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 		}
 		if !dead {
 			t.Fatal("event at max attempts should enter dead_letter")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
+		if _, err := tx.ClaimOutbox(ctx, "integration-worker-3", time.Minute); !errors.Is(err, ErrNoOutboxEvent) {
+			t.Fatalf("published/dead-letter events must not be claimed again, got %v", err)
 		}
 		return nil
 	})

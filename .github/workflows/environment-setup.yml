@@ -84,6 +84,12 @@ jobs:
           print("OIDC issuer and audience variables passed syntax checks.")
           PY
           echo "Database and webhook credentials remain in the hosting provider's secret manager; this workflow does not read or print them."
+      - name: Validate local Compose and bootstrap scripts
+        run: |
+          sh -n scripts/migrate-local.sh
+          bash -n scripts/env-preflight.sh
+          docker compose --env-file configs/arima.env.example config --quiet
+          docker compose --env-file configs/arima.env.example --env-file configs/arima.worker.env.example -f compose.yaml -f compose.worker.yaml config --quiet
       - name: Lint GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
       - name: Verify module integrity and pinned graph

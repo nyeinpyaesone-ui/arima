@@ -4,7 +4,7 @@
 
 ARIMA now has a Go HTTP API scaffold with OIDC JWT verification, PostgreSQL-backed tenant repository primitives, forced row-level security, migrations, audit/idempotency/outbox foundations, and a leased outbox worker package. CI runs PostgreSQL 15 integration tests using a non-superuser runtime role.
 
-Migration 0003 and `PostgresAuthorizer` now provide tenant-scoped role, permission and membership enforcement primitives; `TenantTx.RequirePermission` supports checks inside the same transaction as a business mutation. These primitives are not yet wired to business HTTP routes. This is still not a complete ERP application: business workflows, a concrete outbox publisher, trusted tenant scheduler, and end-to-end tests remain outstanding. The worker package is not wired into the API executable. A real OIDC provider and production database roles must be configured and verified in the target environment.
+Migration 0003 and `PostgresAuthorizer` now provide tenant-scoped role, permission and membership enforcement primitives; `TenantTx.RequirePermission` supports checks inside the same transaction as a business mutation. These primitives are not yet wired to business HTTP routes. Customer create/read routes now use the tenant authorization foundation. Customer creation commits the record, audit event, idempotency response and outbox event in one transaction. A standalone outbox worker and authenticated HTTPS webhook publisher are implemented; the worker uses a bounded tenant scheduler and can be run as a separate process from the same container image. The webhook receiver, hosting provider, production secrets, worker monitoring and real OIDC provider still need environment-specific configuration and staging verification. ARIMA is not yet a complete ERP application: products, inventory, sales, purchases, accounting, approvals and other domain workflows remain to be implemented.
 
 The staging workflow is a guarded provider-adapter template. No live staging or production rollout has been performed.
 
@@ -57,9 +57,9 @@ The Environment Setup Preflight checks configuration presence/syntax and code-le
 
 ## Missing essentials before production use
 
-1. A real OIDC provider integration test suite and trusted operator workflow for provisioning tenant roles/memberships.
+1. A real OIDC provider integration test suite and an audited operator workflow for provisioning tenant roles/memberships; the runbook currently documents the manual process.
 2. Customer and other business services/routes using transactional permission checks and atomic mutation + audit + idempotency + outbox behavior.
-3. A concrete idempotent outbox publisher, trusted tenant scheduler, timeout policy, metrics and alerts.
+3. A receiver implementing durable event acceptance/idempotency, plus worker health/metrics, backlog and dead-letter alerts.
 4. Staging verification of actual runtime/migration/worker grants, RLS, migrations, backup and restore.
 5. A selected hosting provider, authenticated adapter, protected staging rollout and rehearsed rollback.
 6. End-to-end business tests, operational SLOs, observability, capacity/load testing, and a tested production rollout plan.

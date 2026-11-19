@@ -1,6 +1,7 @@
 module github.com/nyeinpyaesone-ui/arima
 
 go 1.25.0
+
 toolchain go1.26.11
 
 require (

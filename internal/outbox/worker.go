@@ -41,13 +41,13 @@ func NewWorker(repository *store.Postgres, handler Handler, lease, pollEvery tim
 		logger = slog.Default()
 	}
 	return &Worker{
-		repository: repository,
-		handler: handler,
-		workerID: hex.EncodeToString(randomID[:]),
-		lease: lease,
+		repository:  repository,
+		handler:     handler,
+		workerID:    hex.EncodeToString(randomID[:]),
+		lease:       lease,
 		maxAttempts: maxAttempts,
-		pollEvery: pollEvery,
-		logger: logger,
+		pollEvery:   pollEvery,
+		logger:      logger,
 	}, nil
 }
 

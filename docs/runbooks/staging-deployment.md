@@ -12,7 +12,8 @@ Create an environment named `staging` and configure:
 
 - Secret `STAGING_DEPLOY_HOOK_URL`: HTTPS URL for a reviewed adapter implementing the contract below.
 - Secret `STAGING_DEPLOY_TOKEN`: high-entropy bearer token shared with the adapter, independently rotatable from the URL.
-- Variable `STAGING_HEALTHCHECK_URL`: HTTPS URL for the deployed service's `/health/ready` endpoint.
+- Variable `STAGING_HEALTHCHECK_URL`: HTTPS URL for the API `/health/ready` endpoint.
+- Variable `STAGING_WORKER_HEALTHCHECK_URL`: HTTPS URL for the worker `/health/ready` endpoint on port 8081.
 - Variables `ARIMA_OIDC_ISSUER` and `ARIMA_OIDC_AUDIENCE`; secret `ARIMA_DATABASE_URL` for the API runtime.
 - Provider-side runtime secrets (not sent through the deployment adapter): `ARIMA_OUTBOX_DATABASE_URL`, `ARIMA_OUTBOX_WEBHOOK_URL`, and `ARIMA_OUTBOX_WEBHOOK_TOKEN` for the dedicated worker.
 

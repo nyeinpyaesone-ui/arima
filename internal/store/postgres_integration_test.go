@@ -85,6 +85,7 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 
 	var recordID string
 	var outboxID string
+	var deadLetterID string
 	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
 		record, err := tx.UpsertRecord(ctx, "customer", "customer-1", 0, json.RawMessage(`{"name":"Tenant A"}`))
 		if err != nil {
@@ -108,6 +109,10 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 			return err
 		}
 		outboxID, err = tx.EnqueueOutbox(ctx, "customer", recordID, "customer.updated", json.RawMessage(`{"record_id":"`+recordID+`"}`))
+		if err != nil {
+			return err
+		}
+		deadLetterID, err = tx.EnqueueOutbox(ctx, "customer", recordID, "customer.notification", json.RawMessage(`{"record_id":"`+recordID+`"}`))
 		if err != nil {
 			return err
 		}
@@ -140,6 +145,20 @@ GRANT SELECT, INSERT, UPDATE ON tenant_records, audit_events, idempotency_keys, 
 	err = repo.WithinTenant(ctx, tenantA, func(tx *TenantTx) error {
 		if _, err := tx.ClaimOutbox(ctx, "integration-worker-2", time.Minute); !errors.Is(err, ErrNoOutboxEvent) {
 			t.Fatalf("published event must not be claimed again, got %v", err)
+		}
+		event, err := tx.ClaimOutbox(ctx, "integration-worker-2", time.Minute)
+		if err != nil {
+			return err
+		}
+		if event.ID != deadLetterID {
+			t.Fatalf("claimed event ID = %q, want %q", event.ID, deadLetterID)
+		}
+		dead, err := tx.FailOutbox(ctx, event.ID, "integration-worker-2", "provider_unavailable", 1)
+		if err != nil {
+			return err
+		}
+		if !dead {
+			t.Fatal("event at max attempts should enter dead_letter")
 		}
 		return nil
 	})

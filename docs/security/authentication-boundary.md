@@ -20,7 +20,7 @@ Configure both or leave both unset outside production. The verified token must c
 - Signature, issuer, audience, expiry/not-before validation and JWKS refresh are delegated to the vetted OIDC library; the application does not parse JWTs manually.
 - The selected identity provider and its access-token claim contract have not yet been integration-tested. Before production, test invalid signatures, wrong issuer/audience, expiry, not-before, unknown/rotated signing keys, missing tenant claim, provider outage and revocation semantics.
 - A tenant ID claim is an identity attribute, not sufficient authorization. Migration 0003 adds tenant-scoped roles, permissions and membership status under forced RLS. `PostgresAuthorizer` evaluates active membership grants; mutation code must additionally call `TenantTx.RequirePermission` inside the same transaction as the mutation to avoid authorization/revocation races.
-- The PostgreSQL tenant repository and schema are foundational primitives; business resource/action routes are not enabled. No end-to-end ERP production readiness is claimed.
+- The PostgreSQL tenant repository and authorization schema are foundational primitives. Customer/business routes are not yet enabled, and no end-to-end ERP production readiness is claimed.
 - Keep the listener private until identity-provider tests, database grants/RLS tests, authorization, TLS ingress, and operational controls are reviewed.
 
 ## Deployment verification

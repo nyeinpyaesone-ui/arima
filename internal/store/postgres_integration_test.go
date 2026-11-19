@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
+	"github.com/nyeinpyaesone-ui/arima/internal/customer"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -57,7 +58,8 @@ VALUES
  ('22222222-2222-4222-8222-222222222222', 'operator', 'Operator')
 ON CONFLICT DO NOTHING;
 INSERT INTO tenant_role_permissions (tenant_id, role_key, permission)
-VALUES ('11111111-1111-4111-8111-111111111111', 'operator', 'customer.read')
+VALUES ('11111111-1111-4111-8111-111111111111', 'operator', 'customer.read'),
+       ('11111111-1111-4111-8111-111111111111', 'operator', 'customer.write')
 ON CONFLICT DO NOTHING;
 INSERT INTO tenant_memberships (tenant_id, subject, role_key, status)
 VALUES
@@ -111,6 +113,39 @@ GRANT SELECT ON tenant_roles, tenant_role_permissions, tenant_memberships TO ari
 	}
 	if err := authorizer.Authorize(ctx, auth.Principal{Subject: "user-a", TenantID: tenantA}, "customer.read"); err != nil {
 		t.Fatalf("active tenant membership should grant permission: %v", err)
+	}
+
+	customerService, err := customer.NewService(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	customerInput := customer.Customer{ExternalID: "customer-service-001", Name: "Service Test", Phone: "+959123456789"}
+	created, err := customerService.Create(ctx, auth.Principal{Subject: "user-a", TenantID: tenantA}, "customer-create-key-01", "integration-correlation-1", customerInput)
+	if err != nil {
+		t.Fatalf("create customer through service: %v", err)
+	}
+	if created.ExternalID != customerInput.ExternalID || created.Name != customerInput.Name || created.Version != 1 {
+		t.Fatalf("unexpected created customer: %#v", created)
+	}
+	replayed, err := customerService.Create(ctx, auth.Principal{Subject: "user-a", TenantID: tenantA}, "customer-create-key-01", "integration-correlation-2", customerInput)
+	if err != nil {
+		t.Fatalf("replay idempotent customer create: %v", err)
+	}
+	if replayed.ID != created.ID || replayed.Version != created.Version {
+		t.Fatalf("idempotent replay changed customer result: first=%#v replay=%#v", created, replayed)
+	}
+	loaded, err := customerService.Get(ctx, auth.Principal{Subject: "user-a", TenantID: tenantA}, customerInput.ExternalID)
+	if err != nil {
+		t.Fatalf("read customer through service: %v", err)
+	}
+	if loaded.ID != created.ID || loaded.Name != created.Name {
+		t.Fatalf("loaded customer mismatch: %#v", loaded)
+	}
+	if _, err := customerService.Create(ctx, auth.Principal{Subject: "user-a", TenantID: tenantB}, "customer-create-key-02", "integration-correlation-3", customerInput); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("suspended tenant membership must not create customer: %v", err)
+	}
+	if _, err := customerService.Get(ctx, auth.Principal{Subject: "user-a", TenantID: tenantB}, customerInput.ExternalID); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("suspended tenant membership must not read customer: %v", err)
 	}
 	if err := authorizer.Authorize(ctx, auth.Principal{Subject: "user-a", TenantID: tenantB}, "customer.read"); !errors.Is(err, auth.ErrPermissionDenied) {
 		t.Fatalf("suspended membership must be denied: %v", err)

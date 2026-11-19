@@ -99,7 +99,11 @@ func (p *Postgres) ListTenantIDs(ctx context.Context, after string, limit int) (
 	if limit < 1 || limit > 5000 {
 		return nil, errors.New("tenant page size must be between 1 and 5000")
 	}
-	rows, err := p.db.QueryContext(ctx, "SELECT id::text FROM tenants WHERE ($1 = '' OR id > $1::uuid) ORDER BY id LIMIT $2", after, limit)
+	var cursor any
+	if after != "" {
+		cursor = after
+	}
+	rows, err := p.db.QueryContext(ctx, "SELECT id::text FROM tenants WHERE ($1::uuid IS NULL OR id > $1::uuid) ORDER BY id LIMIT $2", cursor, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list tenant IDs for scheduler: %w", err)
 	}

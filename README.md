@@ -13,7 +13,7 @@
 - Require verified CI before merging.
 
 ## Quick start
-Requirements: Go 1.26.10 (the CI and container build toolchain).
+Requirements: Go 1.26.11 (the CI and container build toolchain).
 
 ```sh
 go test ./...

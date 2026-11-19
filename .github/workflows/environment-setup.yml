@@ -36,15 +36,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
           cache: true
       - name: Validate planned OIDC configuration
         if: inputs.target != 'development'
         env:
           ARIMA_OIDC_ISSUER: ${{ vars.ARIMA_OIDC_ISSUER }}
           ARIMA_OIDC_AUDIENCE: ${{ vars.ARIMA_OIDC_AUDIENCE }}
+          ARIMA_DATABASE_URL: ${{ secrets.ARIMA_DATABASE_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -60,11 +62,15 @@ jobs:
             https://*) ;;
             *) echo "::error::ARIMA_OIDC_ISSUER must use HTTPS."; exit 1 ;;
           esac
-          echo "Planned OIDC values are present and issuer syntax is HTTPS; runtime OIDC enforcement is not implemented by this scaffold."
+          test -n "$ARIMA_DATABASE_URL" || { echo "::error::Configure secret ARIMA_DATABASE_URL in the selected GitHub Environment."; exit 1; }
+          python3 -c 'import os; from urllib.parse import parse_qs,urlparse; u=urlparse(os.environ["ARIMA_DATABASE_URL"]); assert u.scheme in ("postgres","postgresql") and u.hostname and parse_qs(u.query).get("sslmode")==["verify-full"], "ARIMA_DATABASE_URL must be a PostgreSQL URL using sslmode=verify-full"'
+          echo "OIDC and PostgreSQL configuration shape passed; no secret values were printed."
       - name: Check workflow syntax
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
       - name: Verify module graph is clean
         run: |
+          go mod download
+          go mod verify
           go mod tidy
           git diff --exit-code -- go.mod go.sum
       - name: Check formatting
@@ -76,12 +82,13 @@ jobs:
         run: go vet ./...
       - name: Vulnerability scan
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-      - name: Test with race detector
+      - name: Unit tests with race detector
         run: go test -race ./...
+      # PostgreSQL integration tests run in the main CI workflow with an isolated service.
       - name: Build Linux binary
         run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o /tmp/arima-api ./cmd/erp-api
       - name: Deployment boundary
         run: |
           echo "Preflight completed. No deployment, migration, or release was performed."
-          echo "ARIMA_DATABASE_URL is not required because this scaffold does not implement persistence or migrations."
+          echo "Production configuration shape was checked; no remote database connection or migration was performed."
           echo "Production promotion requires an independently approved deployment target and rollout/rollback procedure."

@@ -4,7 +4,7 @@
 
 The release workflow produces Linux `amd64` and `arm64` API binaries only after the release candidate passes the same Go dependency-graph, formatting, vet, vulnerability, race, and PostgreSQL integration checks. A version tag (`v*`) publishes binaries, SHA-256 checksums, and GitHub build-provenance attestations.
 
-**Publishing a GitHub release is not deploying the service.** No production environment, host, cluster, registry, or deployment credentials are assumed or configured by this repository. Do not add automatic production deployment until an owner-approved target, environment protection, credentials model, health verification, and rollback procedure exist.
+**Publishing a GitHub release is not deploying the service.** No production environment, host, cluster, registry, identity provider, or deployment credentials are configured by this repository. The outbox worker engine exists but is not wired to a concrete publisher or trusted tenant scheduler. There are no production business mutation routes. Do not add automatic production deployment until an owner-approved target, environment protection, credentials model, health verification, and rollback procedure exist.
 
 ## Release procedure
 

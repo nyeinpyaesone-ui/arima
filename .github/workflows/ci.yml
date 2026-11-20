@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [main, 'chore/production-config-baseline']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -13,18 +13,121 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arima_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d arima_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ARIMA_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/arima_test?sslmode=disable
+      ARIMA_TEST_RUNTIME_DATABASE_URL: postgres://arima_runtime:arima_test_password@localhost:5432/arima_test?sslmode=disable
+      ARIMA_CUSTOMER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/arima_customer_test?sslmode=disable
+      ARIMA_CUSTOMER_TEST_RUNTIME_DATABASE_URL: postgres://arima_customer_runtime:arima_customer_test_password@localhost:5432/arima_customer_test?sslmode=disable
+      ARIMA_CUSTOMER_TEST_WORKER_DATABASE_URL: postgres://arima_outbox_runtime:arima_outbox_test_password@localhost:5432/arima_customer_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
+          go-version: '1.26.11'
           cache: true
+      - name: Create isolated customer service integration database
+        env:
+          PGPASSWORD: postgres
+        run: psql "$ARIMA_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE arima_customer_test"
+      - name: Validate local Compose and bootstrap scripts
+        run: |
+          sh -n scripts/migrate-local.sh
+          bash -n scripts/env-preflight.sh
+          docker compose --env-file configs/arima.env.example config --quiet
+          docker compose --env-file configs/arima.env.example --env-file configs/arima.worker.env.example -f compose.yaml -f compose.worker.yaml config --quiet
+      - name: Smoke-test local Compose API and worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file configs/arima.env.example --env-file configs/arima.worker.env.example --project-name arima-ci -f compose.yaml -f compose.worker.yaml)
+          cleanup() {
+            "${compose[@]}" down --volumes --remove-orphans
+          }
+          trap cleanup EXIT
+
+          if ! POSTGRES_PORT=55432 ARIMA_HTTP_PORT=18080 ARIMA_OUTBOX_HEALTH_PORT=18081 \
+            "${compose[@]}" up --build -d api outbox-worker; then
+            "${compose[@]}" ps --all || true
+            "${compose[@]}" logs --no-color database migrate || true
+            echo "::error::Local Compose startup failed; database and migration logs are shown above."
+            exit 1
+          fi
+
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/health/ready >/dev/null &&
+              curl --fail --silent --show-error http://127.0.0.1:18081/health/ready >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" == 45 ]]; then
+              "${compose[@]}" logs --no-color
+              echo "::error::Local Compose services did not become ready."
+              exit 1
+            fi
+            sleep 2
+          done
+
+          applied_migrations="$("${compose[@]}" exec -T database psql -U postgres -d arima_dev -Atc 'SELECT count(*) FROM arima_schema_migrations')"
+          test "$applied_migrations" = "3"
+          restricted_roles="$("${compose[@]}" exec -T database psql -U postgres -d arima_dev -Atc "SELECT bool_and(NOT rolsuper AND NOT rolbypassrls) FROM pg_roles WHERE rolname IN ('arima_api','arima_outbox')")"
+          test "$restricted_roles" = "t"
+          worker_business_access="$("${compose[@]}" exec -T database psql -U postgres -d arima_dev -Atc "SELECT has_table_privilege('arima_outbox','tenant_records','SELECT')")"
+          test "$worker_business_access" = "f"
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+      - name: Verify module integrity and pinned graph
+        run: |
+          go mod download
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
       - name: Format
-        run: test -z "$(gofmt -l ./cmd ./internal)"
+        shell: bash
+        run: |
+          files="$(gofmt -l ./cmd ./internal)"
+          if [[ -n "$files" ]]; then
+            printf 'Go files need gofmt:\n%s\n' "$files"
+            exit 1
+          fi
       - name: Vet
         run: go vet ./...
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
       - name: Tests
         run: go test -race -coverprofile=coverage.out ./...
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [[ -f coverage.out ]]; then
+            go tool cover -func=coverage.out | tee coverage-summary.txt
+          else
+            echo "Coverage profile was not produced." | tee coverage-summary.txt
+          fi
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence
+          path: |
+            coverage.out
+            coverage-summary.txt
+          if-no-files-found: warn
+          retention-days: 14
       - name: Build
-        run: CGO_ENABLED=0 go build -trimpath ./cmd/erp-api
+        run: CGO_ENABLED=0 go build -trimpath -o /tmp/arima-api ./cmd/erp-api

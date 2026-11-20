@@ -1,0 +1,61 @@
+name: Web CI
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/web-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/web-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: web-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generate temporary lockfile bootstrap
+        working-directory: web
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Install from generated lockfile
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Export lockfile bootstrap for source control
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dependency-lock-bootstrap
+          path: web/package-lock.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Type check
+        working-directory: web
+        run: npm run typecheck
+      - name: Build
+        working-directory: web
+        run: npm run build
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Build Go API for integration test
+        run: CGO_ENABLED=0 go build -trimpath -o /tmp/arima-api ./cmd/erp-api
+      - name: Install Nginx and envsubst
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes nginx gettext-base
+      - name: Verify static hosting and same-origin API proxy
+        env:
+          ARIMA_API_BINARY: /tmp/arima-api
+          WEB_DIST_DIR: ${{ github.workspace }}/web/dist
+        run: bash web/deploy/smoke-test.sh

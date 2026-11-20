@@ -53,16 +53,21 @@ jobs:
       - name: Validate staging deployment integration
         env:
           STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+          STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
           STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
         shell: bash
         run: |
           set -euo pipefail
           test -n "$STAGING_DEPLOY_HOOK_URL" || {
-            echo "::error::Configure staging environment secret STAGING_DEPLOY_HOOK_URL for the selected container platform's approved deployment adapter."
+            echo "::error::Configure staging environment secret STAGING_DEPLOY_HOOK_URL."
+            exit 1
+          }
+          test -n "$STAGING_DEPLOY_TOKEN" || {
+            echo "::error::Configure staging environment secret STAGING_DEPLOY_TOKEN."
             exit 1
           }
           test -n "$STAGING_HEALTHCHECK_URL" || {
-            echo "::error::Configure staging environment variable STAGING_HEALTHCHECK_URL, e.g. the HTTPS /health/ready URL."
+            echo "::error::Configure staging environment variable STAGING_HEALTHCHECK_URL."
             exit 1
           }
           case "$STAGING_DEPLOY_HOOK_URL" in https://*) ;; *) echo "::error::Deployment hook must use HTTPS."; exit 1;; esac
@@ -71,21 +76,40 @@ jobs:
       - name: Request staging rollout of exact image
         env:
           STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+          STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
           IMAGE_REF: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         shell: bash
         run: |
           set -euo pipefail
-          payload="$(jq -cn --arg image "$IMAGE_REF" --arg digest "$IMAGE_DIGEST" --arg commit "$GITHUB_SHA" '{image:$image,digest:$digest,commit:$commit,environment:"staging"}')"
-          # The configured adapter must accept this JSON contract and deploy the exact digest.
-          response="$(curl --fail --silent --show-error --max-time 30 \
+          payload="$(jq -cn \
+            --arg image "$IMAGE_REF" \
+            --arg digest "$IMAGE_DIGEST" \
+            --arg commit "$GITHUB_SHA" \
+            '{
+              image:$image,
+              digest:$digest,
+              commit:$commit,
+              environment:"staging",
+              services:[
+                {name:"api",entrypoint:"/erp-api",required_environment:["ARIMA_ENV","ARIMA_ADDR","ARIMA_DATABASE_URL","ARIMA_OIDC_ISSUER","ARIMA_OIDC_AUDIENCE"]},
+                {name:"outbox-worker",entrypoint:"/outbox-worker",required_environment:["ARIMA_ENV","ARIMA_OUTBOX_HEALTH_ADDR","ARIMA_OUTBOX_DATABASE_URL","ARIMA_OUTBOX_WEBHOOK_URL","ARIMA_OUTBOX_WEBHOOK_TOKEN"]}
+              ],
+              readiness:{api:"/health/ready",worker:"/health/ready",worker_port:8081,worker_visibility:"private"}
+            }')"
+          # Do not follow redirects: never forward the bearer token to another host.
+          status="$(curl --fail --silent --show-error --max-time 30 --max-redirs 0 \
+            --output /dev/null --write-out '%{http_code}' \
             --request POST \
+            --header "Authorization: Bearer ${STAGING_DEPLOY_TOKEN}" \
             --header 'Content-Type: application/json' \
             --data "$payload" \
             "$STAGING_DEPLOY_HOOK_URL")"
-          echo "Staging deployment adapter accepted the rollout request."
-          # Do not print response bodies; provider responses may contain operational details.
-          test -n "$response"
+          if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Staging adapter did not return a successful HTTP status."
+            exit 1
+          fi
+          echo "Staging deployment adapter accepted the authenticated rollout request."
 
       - name: Verify staging readiness
         env:

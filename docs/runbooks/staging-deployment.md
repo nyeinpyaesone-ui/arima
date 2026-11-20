@@ -2,65 +2,79 @@
 
 ## Scope
 
-This runbook describes a **managed-container-platform adapter** for staging. The repository does not yet identify a specific provider, so the workflow calls a provider adapter rather than pretending that a generic platform deploy hook is universally compatible.
+This runbook describes a guarded managed-container-platform adapter. No specific provider has been selected, so the GitHub workflow calls a provider adapter rather than assuming a generic platform API.
 
-The workflow is manually dispatched from `main`, requires explicit acknowledgement, uses the protected GitHub Environment `staging`, builds a commit-tagged multi-architecture GHCR image and requests a rollout pinned to the exact immutable image digest, and polls the configured HTTPS health endpoint. It does not deploy production or run migrations.
+The workflow is manually dispatched from `main`, requires explicit acknowledgement, uses the protected GitHub Environment `staging`, builds a multi-architecture GHCR image, and asks the adapter to deploy the exact image digest. The adapter must start two separate processes from that image: API and outbox worker. No production deployment or database migration is performed by this workflow.
 
-## Required GitHub Environment
+## GitHub staging Environment
 
-Create an environment named `staging` and configure:
+Create a GitHub Environment named `staging`. Store only the deployment-control values here:
 
-- Secret `STAGING_DEPLOY_HOOK_URL`: HTTPS URL for a reviewed adapter implementing the contract below.
-- Secret `STAGING_DEPLOY_TOKEN`: high-entropy bearer token shared with the adapter, independently rotatable from the URL.
-- Variable `STAGING_HEALTHCHECK_URL`: HTTPS URL for the deployed service's `/health/ready` endpoint.
+- Secret `STAGING_DEPLOY_HOOK_URL`: HTTPS URL for the reviewed deployment adapter.
+- Secret `STAGING_DEPLOY_TOKEN`: high-entropy bearer token used to authenticate workflow requests to the adapter.
+- Variable `STAGING_HEALTHCHECK_URL`: HTTPS URL for the API `/health/ready` endpoint.
 
-Require an environment reviewer before dispatching deployments. Restrict deployment branches to `main` where GitHub's environment settings support it. Do not store provider credentials, database DSNs, or deploy tokens in repository files or workflow variables. The adapter must keep provider credentials server-side. Never put tokens in URLs or health-check variables.
+Require an environment reviewer before dispatching the workflow. Restrict deployment branches to `main`. Do not store runtime database credentials or webhook tokens in GitHub workflow files, image labels, or deployment payloads.
+
+## Provider-side runtime configuration
+
+The provider's own secret manager must supply these values to the corresponding process. They are not sent by GitHub Actions:
+
+**API service**
+- `ARIMA_ENV=production`
+- `ARIMA_ADDR=:8080`
+- Secret `ARIMA_DATABASE_URL`: dedicated API database role; PostgreSQL URL must use `sslmode=verify-full`.
+- Variable `ARIMA_OIDC_ISSUER`: exact HTTPS issuer URL from the selected identity provider.
+- Variable `ARIMA_OIDC_AUDIENCE`: audience configured for ARIMA access tokens.
+
+**Outbox worker**
+- `ARIMA_ENV=production`
+- `ARIMA_OUTBOX_HEALTH_ADDR=:8081`
+- Secret `ARIMA_OUTBOX_DATABASE_URL`: separate least-privileged worker database role; use `sslmode=verify-full`.
+- Secret `ARIMA_OUTBOX_WEBHOOK_URL`: durable HTTPS receiver endpoint.
+- Secret `ARIMA_OUTBOX_WEBHOOK_TOKEN`: bearer token accepted by that receiver.
+
+Do not reuse migration credentials for either process. API and worker roles must be `NOSUPERUSER NOBYPASSRLS`. Keep webhook credentials out of the API container. Keep worker port 8081 private; only the API needs public ingress.
 
 ## Adapter contract — mandatory before dispatch
 
 The adapter must:
 
-1. Require HTTPS and authenticate the `Authorization: Bearer` token; compare it safely and support rotation.
-2. Allow-list the repository and image namespace `ghcr.io/nyeinpyaesone-ui/arima`.
-3. Accept JSON fields `image`, `digest`, `commit`, and `environment`.
-4. Reject any environment other than `staging` and deploy the exact supplied digest, not a mutable tag.
-5. Return a 2xx response only after the provider accepts the staging rollout request.
-6. Preserve the previous known-good revision and document/rehearse provider-native rollback.
-7. Avoid logging tokens, deploy-hook URLs, database credentials, or sensitive request bodies.
+1. Require HTTPS and authenticate `Authorization: Bearer` with `STAGING_DEPLOY_TOKEN`; support safe rotation and never log the token.
+2. Allow-list repository and image namespace `ghcr.io/nyeinpyaesone-ui/arima`.
+3. Accept the `image`, immutable `digest`, `commit`, `environment`, `services` and `readiness` fields from the workflow.
+4. Reject any environment other than `staging`; deploy both processes from the exact supplied digest.
+5. Launch the API with entrypoint `/erp-api` and the worker with entrypoint `/outbox-worker`. This is an entrypoint override, not a command argument; the image's default entrypoint is `/erp-api`.
+6. Resolve each service's `required_environment` names from the provider secret manager. Never expect actual secret values in the deployment payload.
+7. Verify both API and worker `/health/ready` endpoints from inside the provider network. Worker readiness must remain private; do not expose port 8081 publicly just so a GitHub-hosted runner can probe it.
+8. Return 2xx only after the provider accepts the exact digest and both process readiness checks pass. Preserve the previous known-good revision and provide a tested rollback.
+9. Avoid logging tokens, deployment hook URLs, database credentials, sensitive request bodies, or customer/event payloads.
 
-A vendor-provided one-click deploy hook is **not** assumed to implement this contract. Build and test the adapter for the chosen provider before enabling the workflow. The workflow does not follow HTTP redirects when sending the request. Adapter authentication, repository allow-listing, and staging-only enforcement are mandatory; HTTPS by itself is not caller authentication.
+A generic one-click deploy hook is not assumed to implement this contract. Build and test the adapter for the chosen provider before enabling the workflow. HTTPS alone is not caller authentication. Do not follow redirects when sending bearer credentials to the adapter.
 
-## Service compatibility and limits
+The GitHub workflow performs a separate public API readiness check after the adapter accepts the rollout. The adapter is responsible for the worker's private readiness check.
 
-- Go API entry point: `cmd/erp-api`.
-- Container listens on port `8080`.
-- Existing health endpoints are process-level checks.
-- Current readiness is process-level only; HTTP 200 with status `ready` does not establish database connectivity, OIDC enforcement, authorization, or business correctness.
-- The current service is a scaffold. A successful rollout validates container delivery and process availability, not production ERP readiness.
-- Image publishing on a push to `main` is handled by the separate container-image workflow; the staging workflow builds and publishes the selected commit itself so the rollout is tied to the image digest emitted in that run.
-- Adapter configuration is validated before image publication. No provider adapter has been selected or verified yet.
+## Service and database requirements
 
-## PostgreSQL hosted separately from the managed container runtime
+- The image contains `/erp-api` (port 8080) and `/outbox-worker` (health port 8081).
+- API readiness verifies PostgreSQL connectivity when configured; production startup additionally verifies required schema including tenant authorization and outbox lease metadata.
+- Worker readiness verifies worker-database connectivity and required outbox schema. It does not prove webhook delivery.
+- Customer create/read routes enforce tenant permissions inside the tenant transaction. Customer creation commits the record, audit event, idempotency response and outbox event atomically.
+- Migration 0003 creates tenant-local roles, permissions and memberships under forced RLS. Provision grants only through the trusted operator process; no public membership administration endpoint exists.
+- Apply migrations 0001, 0002 and 0003 as a reviewed operation using a dedicated migration identity before starting either process. The API and worker do not run migrations at startup.
 
-The current service scaffold has no active PostgreSQL persistence or migration implementation. Do not configure or inject an unused `ARIMA_DATABASE_URL`, and do not claim database readiness until persistence is implemented.
+The API role should receive only SELECT/INSERT/UPDATE on `tenant_records` and `idempotency_keys`, INSERT on `audit_events`, SELECT/INSERT on `outbox_events`, and SELECT on tenant role/membership tables. It must not update outbox rows or administer memberships.
 
-When database-backed application code is introduced:
+The worker role should receive only SELECT on `tenants` and SELECT/UPDATE on `outbox_events`. It must not read business records or membership tables. Verify effective privileges and forced RLS against the actual staging database.
 
-- Store `ARIMA_DATABASE_URL` in the managed platform's secret store, never in this workflow, logs, image labels, or adapter payload.
-- Establish private connectivity from the container runtime to the PostgreSQL host using the provider's private network, VPN, or a narrowly restricted TLS endpoint.
-- Enforce TLS certificate verification, firewall allow-lists, least-privilege runtime and separate migration roles, connection limits, backups, and tested restore procedures.
-- Add database-aware readiness and integration tests using a non-superuser role with `NOSUPERUSER NOBYPASSRLS` where row-level security is required.
-- Run schema migrations as a separately reviewed, controlled operation. This staging deploy workflow intentionally does not run them.
+## Webhook receiver contract
 
-## Rollback and failure handling
+The receiver must authenticate the bearer token, accept only expected event types, durably accept each event before returning 2xx, and deduplicate by event ID using `Idempotency-Key` and `X-ARIMA-Event-ID`. Delivery is at-least-once, not exactly-once. HTTP 429/5xx are retried; permanent rejection is dead-lettered. Configure delivery metrics and alerts for pending age, retries, expired leases and dead-letter volume.
 
-The workflow fails if the adapter rejects the request or readiness is not observed within five minutes. It does not automatically roll back through an unknown provider API. The provider adapter/platform must retain the prior known-good revision and expose a documented rollback path. Rehearse rollback before calling staging validated; record the deployed commit, image digest, result, and redacted logs.
+## Migration, rollback and remaining gates
 
-## Remaining readiness gates
+The workflow deliberately does not apply migrations. Test migrations, permissions, RLS, backup and restore against a disposable PostgreSQL database and then staging. Production DSNs must use `sslmode=verify-full`; never disable TLS verification.
 
-- Select the managed container provider and implement/review its authenticated adapter.
-- Configure and protect the `staging` environment, rotate/secure the bearer token, and verify private GHCR image pull access.
-- Validate container limits, port binding, secrets, TLS, DNS, logs, alerts, and provider rollback.
-- Implement and test application-level OIDC/authz, tenant isolation, persistence, migrations, outbox, and database-aware readiness as applicable to the product.
-- Pass current-head CI, dependency scanning, container scanning, end-to-end tests, and a documented staging/rollback rehearsal.
-- Keep production deployment out of scope until readiness evidence is reviewed and a separate protected production workflow is approved.
+The adapter must retain the previous immutable image digest and support provider-native rollback. Rehearse rollback before treating staging as validated; record deployed commit, digest, result and redacted logs.
+
+Before production use, complete real OIDC provider tests, secret-manager wiring, actual staging role/grant verification, webhook receiver verification, container/network/resource limits, monitoring, end-to-end business tests, SLOs, load tests and a separately approved protected production release process. No live staging or production deployment has been performed by this repository work.

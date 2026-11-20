@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: Environment to validate (this workflow does not deploy)
+        description: Environment to validate (preflight only; no deployment)
         required: true
         type: choice
         options:
@@ -22,25 +22,47 @@ concurrency:
 
 jobs:
   preflight:
-    # Environment configuration is only read from the trusted main branch.
-    # Feature branches are covered by normal pull-request CI.
     if: github.ref == 'refs/heads/main'
-    name: Validate ${{ inputs.target }} environment
+    name: Validate ${{ inputs.target }} configuration and code
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     environment: ${{ inputs.target }}
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arima_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d arima_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       TARGET_ENV: ${{ inputs.target }}
+      ARIMA_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/arima_test?sslmode=disable
+      ARIMA_TEST_RUNTIME_DATABASE_URL: postgres://arima_runtime:arima_test_password@localhost:5432/arima_test?sslmode=disable
+      ARIMA_CUSTOMER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/arima_customer_test?sslmode=disable
+      ARIMA_CUSTOMER_TEST_RUNTIME_DATABASE_URL: postgres://arima_customer_runtime:arima_customer_test_password@localhost:5432/arima_customer_test?sslmode=disable
+      ARIMA_CUSTOMER_TEST_WORKER_DATABASE_URL: postgres://arima_outbox_runtime:arima_outbox_test_password@localhost:5432/arima_customer_test?sslmode=disable
     steps:
       - name: Checkout trusted main commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.10'
+          go-version: "1.26.11"
           cache: true
-      - name: Validate planned OIDC configuration
+      - name: Create isolated customer integration database
+        env:
+          PGPASSWORD: postgres
+        run: psql "$ARIMA_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE arima_customer_test"
+      - name: Validate target environment configuration shape
         if: inputs.target != 'development'
         env:
           ARIMA_OIDC_ISSUER: ${{ vars.ARIMA_OIDC_ISSUER }}
@@ -48,40 +70,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$ARIMA_OIDC_ISSUER" || {
-            echo "::error::Configure environment variable ARIMA_OIDC_ISSUER in GitHub Environment '$TARGET_ENV'."
-            exit 1
-          }
-          test -n "$ARIMA_OIDC_AUDIENCE" || {
-            echo "::error::Configure environment variable ARIMA_OIDC_AUDIENCE in GitHub Environment '$TARGET_ENV'."
-            exit 1
-          }
-          case "$ARIMA_OIDC_ISSUER" in
-            https://*) ;;
-            *) echo "::error::ARIMA_OIDC_ISSUER must use HTTPS."; exit 1 ;;
-          esac
-          echo "Planned OIDC values are present and issuer syntax is HTTPS; runtime OIDC enforcement is not implemented by this scaffold."
-      - name: Check workflow syntax
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
-      - name: Verify module graph is clean
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          issuer_value = os.environ.get("ARIMA_OIDC_ISSUER", "").strip()
+          audience = os.environ.get("ARIMA_OIDC_AUDIENCE", "").strip()
+          issuer = urlparse(issuer_value)
+          if issuer.scheme != "https" or not issuer.hostname:
+              raise SystemExit("ARIMA_OIDC_ISSUER must be an absolute HTTPS URL")
+          if not audience:
+              raise SystemExit("ARIMA_OIDC_AUDIENCE is required")
+          print("OIDC issuer and audience variables passed syntax checks.")
+          PY
+          echo "Database and webhook credentials remain in the hosting provider's secret manager; this workflow does not read or print them."
+      - name: Validate local Compose and bootstrap scripts
         run: |
+          sh -n scripts/migrate-local.sh
+          bash -n scripts/env-preflight.sh
+          docker compose --env-file configs/arima.env.example config --quiet
+          docker compose --env-file configs/arima.env.example --env-file configs/arima.worker.env.example -f compose.yaml -f compose.worker.yaml config --quiet
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+      - name: Verify module integrity and pinned graph
+        run: |
+          go mod download
+          go mod verify
           go mod tidy
           git diff --exit-code -- go.mod go.sum
       - name: Check formatting
         shell: bash
         run: |
           files="$(gofmt -l ./cmd ./internal)"
-          if [[ -n "$files" ]]; then printf 'Go files need gofmt:\n%s\n' "$files"; exit 1; fi
+          if [[ -n "$files" ]]; then
+            printf 'Go files need gofmt:\n%s\n' "$files"
+            exit 1
+          fi
       - name: Vet
         run: go vet ./...
       - name: Vulnerability scan
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-      - name: Test with race detector
-        run: go test -race ./...
+      - name: PostgreSQL integration tests and race detector
+        run: go test -race -coverprofile=coverage.out ./...
       - name: Build Linux binary
         run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o /tmp/arima-api ./cmd/erp-api
       - name: Deployment boundary
-        run: |
-          echo "Preflight completed. No deployment, migration, or release was performed."
-          echo "ARIMA_DATABASE_URL is not required because this scaffold does not implement persistence or migrations."
-          echo "Production promotion requires an independently approved deployment target and rollout/rollback procedure."
+        run: echo "Preflight completed. No deployment, migration against a target environment, or release was performed."

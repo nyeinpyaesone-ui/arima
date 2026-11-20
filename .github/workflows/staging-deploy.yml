@@ -124,6 +124,7 @@ jobs:
                 exit 0
               fi
             fi
+            echo "Staging readiness probe ${attempt}/30 has not succeeded yet."
             sleep 10
           done
           echo "::error::Staging did not report ready within 5 minutes. Inspect platform logs and roll back through the platform's documented controls."

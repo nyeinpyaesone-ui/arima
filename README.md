@@ -25,7 +25,7 @@ curl --fail --silent --show-error http://127.0.0.1:8080/health/live
 curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
 ```
 
-Compose starts PostgreSQL, applies migrations 0001–0004 once using a migration ledger, provisions separate local-only API/worker database roles, and starts the API. The database volume persists after `make dev-down`. Do not run `docker compose down -v` unless you intend to delete the local database.
+Compose starts PostgreSQL, applies migrations 0001–0003 once using a migration ledger, provisions separate local-only API/worker database roles, and starts the API. The database volume persists after `make dev-down`. Do not run `docker compose down -v` unless you intend to delete the local database.
 
 For local Go checks, run `go mod download`, `go mod verify`, `make check`, and `go run ./cmd/erp-api`. Without a configured OIDC provider, customer routes remain inaccessible (fail closed). Provision a real development tenant membership for the exact OIDC subject before testing customer access.
 

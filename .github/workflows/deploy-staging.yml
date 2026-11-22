@@ -124,7 +124,7 @@ jobs:
           # The adapter must validate this bearer token, allow-list this repo/image,
           # and deploy the digest only to staging. Never log the token or payload.
           status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            --connect-timeout 10 --max-time 30 \
+            --connect-timeout 10 --max-time 30 --max-redirs 0 \
             --request POST \
             --header 'Content-Type: application/json' \
             --header "Authorization: Bearer ${STAGING_DEPLOY_TOKEN}" \

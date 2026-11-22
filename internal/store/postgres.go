@@ -120,8 +120,10 @@ func (p *Postgres) ListTenantIDs(ctx context.Context, after string, limit int) (
 }
 
 // RequirePermission evaluates a tenant membership and role grant inside the
-// caller's existing business transaction. This prevents authorization from
-// racing a membership revocation between a separate check and a mutation.
+// caller's business transaction. This avoids a separate preflight authorization
+// check, but does not cancel an operation that has already passed this check:
+// a concurrent revocation takes effect for permission checks that run after the
+// revocation commits. Immediate cancellation requires a separate lock protocol.
 func (t *TenantTx) RequirePermission(ctx context.Context, subject, permission string) error {
 	subject = strings.TrimSpace(subject)
 	permission = strings.TrimSpace(permission)
@@ -184,6 +186,43 @@ RETURNING id::text, tenant_id::text, resource_type, external_id, version, payloa
 		return Record{}, fmt.Errorf("upsert tenant record: %w", err)
 	}
 	return record, nil
+}
+
+// ListRecords returns a tenant-scoped, resource-type-scoped keyset page.
+// The caller passes limit+1 to determine whether another page exists.
+func (t *TenantTx) ListRecords(ctx context.Context, resourceType, after string, limit int) ([]Record, error) {
+	if strings.TrimSpace(resourceType) == "" || limit < 1 || limit > 101 {
+		return nil, errors.New("resource type and page size between 1 and 101 are required")
+	}
+	var rows *sql.Rows
+	var err error
+	if after == "" {
+		rows, err = t.tx.QueryContext(ctx, `SELECT id::text, tenant_id::text, resource_type, external_id, version, payload, created_at, updated_at
+FROM tenant_records
+WHERE tenant_id = $1::uuid AND resource_type = $2
+ORDER BY external_id ASC LIMIT $3`, t.tenantID, resourceType, limit)
+	} else {
+		rows, err = t.tx.QueryContext(ctx, `SELECT id::text, tenant_id::text, resource_type, external_id, version, payload, created_at, updated_at
+FROM tenant_records
+WHERE tenant_id = $1::uuid AND resource_type = $2 AND external_id > $3
+ORDER BY external_id ASC LIMIT $4`, t.tenantID, resourceType, after, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list tenant records: %w", err)
+	}
+	defer rows.Close()
+	records := make([]Record, 0, limit)
+	for rows.Next() {
+		var record Record
+		if err := rows.Scan(&record.ID, &record.TenantID, &record.ResourceType, &record.ExternalID, &record.Version, &record.Payload, &record.CreatedAt, &record.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan tenant record: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenant records: %w", err)
+	}
+	return records, nil
 }
 
 func (t *TenantTx) GetRecord(ctx context.Context, resourceType, externalID string) (Record, error) {

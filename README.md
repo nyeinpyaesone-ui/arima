@@ -6,7 +6,8 @@
 
 - Go HTTP API with OIDC JWT verification, bearer authentication, graceful shutdown and dependency readiness.
 - PostgreSQL migrations for tenant records, forced RLS, audit events, idempotency, transactional outbox, worker leases, tenant roles, permissions and memberships.
-- Customer create/read API with permission checks inside tenant transactions.
+- Tenant-scoped customer create/read/list API with permission checks inside tenant transactions.
+- Customer listing uses bounded keyset pagination, stable external-ID ordering and an opaque cursor; tenant and resource-type filtering remain enforced in SQL and PostgreSQL RLS.
 - Customer creation atomically commits the customer record, audit event, idempotency result and outbox event.
 - Standalone outbox worker with bounded tenant pagination, concurrent-safe leases, delivery timeout, authenticated HTTPS webhook publisher, retry and dead-letter handling.
 - Multi-architecture container image builds for Linux AMD64 and ARM64; the image contains both API and worker binaries.
@@ -36,6 +37,7 @@ For local Go checks, run `go mod download`, `go mod verify`, `make check`, and `
 | GET | /health/live | None | Process liveness |
 | GET | /health/ready | None | API and configured PostgreSQL readiness |
 | GET | /api/v1/me | Valid OIDC access token | Return verified subject and tenant |
+| GET | /api/v1/customers?limit=&after= | customer.read | List customers (default 25, max 100; keyset cursor) |
 | POST | /api/v1/customers | customer.write | Create customer with Idempotency-Key |
 | GET | /api/v1/customers/{externalID} | customer.read | Read customer within caller's tenant |
 

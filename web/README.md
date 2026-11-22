@@ -4,13 +4,15 @@ A React + TypeScript + Vite workspace using the **ARIMA — Precision Operations
 
 ## Scope
 
-This is a frontend foundation, not a completed ERP console. The current Go executable implements only:
+This is a frontend foundation, not a completed ERP console. The Go API currently implements:
 
-- `GET /health/live`
-- `GET /health/ready`
-- `GET /`
+- `GET /health/live` and `GET /health/ready`
+- `GET /api/v1/me` for verified caller identity and tenant context
+- `POST /api/v1/customers` for tenant-authorized customer creation
+- `GET /api/v1/customers/{externalID}` for tenant-authorized customer reads
+- `GET /api/v1/customers?limit=&after=` for bounded, tenant-authorized customer listing
 
-The workspace displays those health probes and links to source-controlled API and architecture contracts. It does not expose business workflows, tenant data, authentication controls, or audit operations because those runtime capabilities are not implemented yet.
+The Vite workspace currently displays health probes and links to source-controlled API and architecture contracts. It does not yet provide browser authentication, customer workflows, tenant data views, or audit operations. A real OIDC provider and browser session/token boundary must be selected and implemented before authenticated business screens are added.
 
 ## Requirements
 
@@ -45,7 +47,7 @@ npm run build
 npm run preview
 ```
 
-The production output is written to `web/dist`. The deployment layer must serve these static assets and route `/health/*` to the Go API on the same origin (or provide an equivalent reverse-proxy configuration). No production hosting or authentication integration is configured by this foundation. For an Nginx-based same-origin setup, see [deploy/README.md](deploy/README.md) and the upstream-configurable template in `deploy/nginx.conf.template`.
+The production output is written to `web/dist`. The deployment layer must serve these static assets and route `/health/*` to the Go API on the same origin (or provide an equivalent reverse-proxy configuration). No production hosting or browser authentication integration is configured by this foundation. For an Nginx-based same-origin setup, see [deploy/README.md](deploy/README.md) and the upstream-configurable template in `deploy/nginx.conf.template`.
 
 ## Design tokens
 

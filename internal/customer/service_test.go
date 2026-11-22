@@ -2,7 +2,9 @@ package customer
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
@@ -28,6 +30,22 @@ func TestCustomerServiceValidatesInputBeforeDatabaseAccess(t *testing.T) {
 	valid := Customer{ExternalID: "customer-1", Name: "Test Customer"}
 	if _, err := service.Create(context.Background(), principal, "", "corr-1", valid); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("missing idempotency key must be rejected before database access, got %v", err)
+	}
+	if _, err := service.List(context.Background(), principal, -1, ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("negative limit must be rejected before database access: %v", err)
+	}
+	if _, err := service.List(context.Background(), principal, 101, ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("limit above maximum must be rejected before database access: %v", err)
+	}
+	if _, err := service.List(context.Background(), principal, 25, "not-a-valid-cursor!"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("invalid cursor must be rejected before database access: %v", err)
+	}
+	invalidUTF8Cursor := base64.RawURLEncoding.EncodeToString([]byte{0xff, 0xfe})
+	if _, err := service.List(context.Background(), principal, 25, invalidUTF8Cursor); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("cursor containing invalid UTF-8 must be rejected before database access: %v", err)
+	}
+	if _, err := service.List(context.Background(), principal, 25, strings.Repeat("a", 513)); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("oversized cursor must be rejected before database access: %v", err)
 	}
 	if _, err := service.Get(context.Background(), principal, " "); !errors.Is(err, ErrInvalidCustomer) {
 		t.Fatalf("empty external ID must be rejected before database access, got %v", err)

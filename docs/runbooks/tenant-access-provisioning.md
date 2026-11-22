@@ -9,7 +9,7 @@ The OIDC token supplies the immutable identity-provider subject (sub) and tenant
 - tenant_role_permissions: explicit tenant-local grants.
 - Forced RLS on all three tables, using the transaction-local app.tenant_id set by Postgres.WithinTenant.
 
-Customer writes require customer.write; reads require customer.read. The service calls TenantTx.RequirePermission inside the same transaction as the business operation, so a concurrent membership revocation cannot slip between a separate authorization check and the mutation.
+Customer writes require customer.write; reads require customer.read. The service calls TenantTx.RequirePermission inside the same transaction as the business operation, avoiding a separate preflight check. Current consistency contract: an operation that has already passed its permission check may finish even if a concurrent membership revocation commits before that operation commits; permission checks beginning after the revocation commits are denied. Revocation is not an immediate cancellation mechanism for in-flight requests.
 
 ## Required migration
 

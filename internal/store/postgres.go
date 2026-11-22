@@ -192,10 +192,19 @@ func (t *TenantTx) ListRecords(ctx context.Context, resourceType, after string, 
 	if strings.TrimSpace(resourceType) == "" || limit < 1 || limit > 101 {
 		return nil, errors.New("resource type and page size between 1 and 101 are required")
 	}
-	rows, err := t.tx.QueryContext(ctx, `SELECT id::text, tenant_id::text, resource_type, external_id, version, payload, created_at, updated_at
+	var rows *sql.Rows
+	var err error
+	if after == "" {
+		rows, err = t.tx.QueryContext(ctx, `SELECT id::text, tenant_id::text, resource_type, external_id, version, payload, created_at, updated_at
 FROM tenant_records
-WHERE tenant_id = $1::uuid AND resource_type = $2 AND ($3 = '' OR external_id > $3)
+WHERE tenant_id = $1::uuid AND resource_type = $2
+ORDER BY external_id ASC LIMIT $3`, t.tenantID, resourceType, limit)
+	} else {
+		rows, err = t.tx.QueryContext(ctx, `SELECT id::text, tenant_id::text, resource_type, external_id, version, payload, created_at, updated_at
+FROM tenant_records
+WHERE tenant_id = $1::uuid AND resource_type = $2 AND external_id > $3
 ORDER BY external_id ASC LIMIT $4`, t.tenantID, resourceType, after, limit)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list tenant records: %w", err)
 	}

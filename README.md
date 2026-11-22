@@ -6,7 +6,8 @@
 
 - Go HTTP API with OIDC JWT verification, bearer authentication, graceful shutdown and dependency readiness.
 - PostgreSQL migrations for tenant records, forced RLS, audit events, idempotency, transactional outbox, worker leases, tenant roles, permissions and memberships.
-- Customer create/read API with permission checks inside tenant transactions.
+- Tenant-scoped customer create/read/list API with permission checks inside tenant transactions.
+- Customer listing uses bounded keyset pagination, stable external-ID ordering and an opaque cursor; tenant and resource-type filtering remain enforced in SQL and PostgreSQL RLS.
 - Customer creation atomically commits the customer record, audit event, idempotency result and outbox event.
 - Standalone outbox worker with bounded tenant pagination, concurrent-safe leases, delivery timeout, authenticated HTTPS webhook publisher, retry and dead-letter handling.
 - Multi-architecture container image builds for Linux AMD64 and ARM64; the image contains both API and worker binaries.
@@ -24,7 +25,7 @@ curl --fail --silent --show-error http://127.0.0.1:8080/health/live
 curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
 ```
 
-Compose starts PostgreSQL, applies migrations 0001–0003 once using a migration ledger, provisions separate local-only API/worker database roles, and starts the API. The database volume persists after `make dev-down`. Do not run `docker compose down -v` unless you intend to delete the local database.
+Compose starts PostgreSQL, applies migrations 0001–0004 once using a migration ledger, provisions separate local-only API/worker database roles, and starts the API. The database volume persists after `make dev-down`. Do not run `docker compose down -v` unless you intend to delete the local database.
 
 For local Go checks, run `go mod download`, `go mod verify`, `make check`, and `go run ./cmd/erp-api`. Without a configured OIDC provider, customer routes remain inaccessible (fail closed). Provision a real development tenant membership for the exact OIDC subject before testing customer access.
 
@@ -36,6 +37,7 @@ For local Go checks, run `go mod download`, `go mod verify`, `make check`, and `
 | GET | /health/live | None | Process liveness |
 | GET | /health/ready | None | API and configured PostgreSQL readiness |
 | GET | /api/v1/me | Valid OIDC access token | Return verified subject and tenant |
+| GET | /api/v1/customers?limit=&after= | customer.read | List customers (default 25, max 100; keyset cursor) |
 | POST | /api/v1/customers | customer.write | Create customer with Idempotency-Key |
 | GET | /api/v1/customers/{externalID} | customer.read | Read customer within caller's tenant |
 
@@ -60,6 +62,7 @@ Apply the reviewed migrations in order:
 1. migrations/0001_tenant_foundation.up.sql
 2. migrations/0002_outbox_leases.up.sql
 3. migrations/0003_tenant_authorization.up.sql
+4. migrations/0004_customer_listing.up.sql
 
 The API never runs migrations at startup. Use a dedicated migration identity. API and worker runtime identities must be NOSUPERUSER and NOBYPASSRLS. The API role requires read-only access to tenant role/membership tables and only required business DML. The worker role requires SELECT on tenants and SELECT/UPDATE on outbox_events; it must not receive business-record or membership administration access.
 

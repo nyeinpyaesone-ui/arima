@@ -18,7 +18,7 @@
 Create a GitHub Environment named `staging`. Keep deployment secrets scoped to that environment.
 
 - Secret `STAGING_DEPLOY_HOOK_URL`: HTTPS endpoint for a **trusted deployment adapter** that accepts a POST JSON payload with `image`, `digest`, `commit`, and `environment`, and deploys the exact digest. A generic provider deploy hook is not automatically compatible with this contract; implement/configure an adapter for the chosen vendor before enabling this workflow.
-- Variable `STAGING_HEALTHCHECK_URL`: HTTPS URL ending in `/health/ready`, reachable from GitHub-hosted runners.
+- Variable `STAGING_HEALTHCHECK_URL`: HTTPS URL for a provider adapter's **aggregate staging status** endpoint, reachable from GitHub-hosted runners. It must return JSON with both `api.status` and `worker.status` set to `ready` only after the exact image digest is deployed and both services are healthy. The app's API `/health/ready` endpoint alone is insufficient.
 - Ensure the container platform can pull private `ghcr.io/nyeinpyaesone-ui/arima` images, or configure package visibility intentionally.
 - Configure the container service to listen on port 8080 and inject `ARIMA_ADDR=:8080` (or the platform's supported port mapping).
 
@@ -35,7 +35,7 @@ The adapter must:
 4. Return success only after the platform accepts the exact digest.
 5. Avoid logging the hook URL, credentials, or database DSN.
 
-The workflow currently sends no production credentials, grants no cloud-wide permissions, and has no production environment/job. It uses `GITHUB_TOKEN` only to publish the image to GHCR. The configured adapter must be reviewed and tested before the manual workflow is used.
+The workflow currently sends no production credentials, grants no cloud-wide permissions, and has no production environment/job. It uses `GITHUB_TOKEN` only to publish the image to GHCR. The configured adapter must be reviewed and tested before the manual workflow is used. The aggregate readiness endpoint must expose a response such as `{\"api\":{\"status\":\"ready\"},\"worker\":{\"status\":\"ready\"}}`; it must not report ready until both API and worker readiness checks pass.
 
 ## Remaining readiness blockers
 

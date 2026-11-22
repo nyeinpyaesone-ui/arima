@@ -42,9 +42,6 @@ func TestCustomerServiceValidatesInputBeforeDatabaseAccess(t *testing.T) {
 	if _, err := service.List(context.Background(), principal, 25, strings.Repeat("a", 513)); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("oversized cursor must be rejected before database access: %v", err)
 	}
-	if _, err := service.List(context.Background(), principal, 25, strings.Repeat("a", 513)); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("oversized cursor must be rejected before database access: %v", err)
-	}
 	if _, err := service.Get(context.Background(), principal, " "); !errors.Is(err, ErrInvalidCustomer) {
 		t.Fatalf("empty external ID must be rejected before database access, got %v", err)
 	}

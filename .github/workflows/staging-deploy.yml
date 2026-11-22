@@ -119,8 +119,8 @@ jobs:
           set -euo pipefail
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error --max-time 5 "$STAGING_HEALTHCHECK_URL" -o /tmp/health.json; then
-              if jq -e '.status == "ready"' /tmp/health.json >/dev/null; then
-                echo "Staging readiness endpoint reports ready."
+              if jq -e '.api.status == "ready" and .worker.status == "ready"' /tmp/health.json >/dev/null; then
+                echo "Staging API and worker readiness report ready."
                 exit 0
               fi
             fi

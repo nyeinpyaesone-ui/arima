@@ -30,8 +30,8 @@ type Customer struct {
 }
 
 type CustomerPage struct {
-	Items []Customer `json:"items"`
-	NextCursor string `json:"next_cursor"`
+	Items      []Customer `json:"items"`
+	NextCursor string     `json:"next_cursor"`
 }
 
 type customerData struct {
@@ -67,8 +67,7 @@ func (s *Service) Create(ctx context.Context, principal auth.Principal, idempote
 	}
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	correlationID = strings.TrimSpace(correlationID)
-	if len(idempotencyKey) < 8 || len(idempotencyKey) > 200 || correlationID == "" || len(correlationID) > 128 || strings.ContainsAny(correlationID, "\r
-") {
+	if len(idempotencyKey) < 8 || len(idempotencyKey) > 200 || correlationID == "" || len(correlationID) > 128 || strings.ContainsAny(correlationID, "\r\n") {
 		return Customer{}, ErrInvalidRequest
 	}
 	data := customerData{ExternalID: input.ExternalID, Name: input.Name, Phone: input.Phone, Email: input.Email, Notes: input.Notes}
@@ -128,7 +127,7 @@ func (s *Service) List(ctx context.Context, principal auth.Principal, limit int,
 	if limit == 0 {
 		limit = 25
 	}
-	if limit < 1 || limit > 100 {
+	if limit < 1 || limit > 100 || len(cursor) > 512 {
 		return CustomerPage{}, ErrInvalidRequest
 	}
 	after := ""

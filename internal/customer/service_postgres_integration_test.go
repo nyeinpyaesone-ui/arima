@@ -87,7 +87,10 @@ GRANT SELECT, UPDATE ON outbox_events TO arima_outbox_runtime;`)
 	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_role_permissions (tenant_id, role_key, permission) VALUES ($1::uuid, 'operator', 'customer.read'), ($1::uuid, 'operator', 'customer.write')", tenantA); err != nil {
 		t.Fatalf("seed customer permissions: %v", err)
 	}
-	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_roles (tenant_id, role_key, display_name) VALUES ($1::uuid, 'viewer', 'Viewer')", tenantB); err != nil { t.Fatalf("seed tenant B role: %v", err) }\n\tif _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_role_permissions (tenant_id, role_key, permission) VALUES ($1::uuid, 'viewer', 'customer.read')", tenantB); err != nil { t.Fatalf("seed tenant B permission: %v", err) }\n\tif _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'viewer', 'active')", tenantB); err != nil { t.Fatalf("seed tenant B membership: %v", err) }\n\tif _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'operator', 'active')", tenantA); err != nil {
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_roles (tenant_id, role_key, display_name) VALUES ($1::uuid, 'viewer', 'Viewer')", tenantB); err != nil { t.Fatalf("seed tenant B role: %v", err) }
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_role_permissions (tenant_id, role_key, permission) VALUES ($1::uuid, 'viewer', 'customer.read')", tenantB); err != nil { t.Fatalf("seed tenant B permission: %v", err) }
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'viewer', 'active')", tenantB); err != nil { t.Fatalf("seed tenant B membership: %v", err) }
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'operator', 'active')", tenantA); err != nil {
 		t.Fatalf("seed customer membership: %v", err)
 	}
 

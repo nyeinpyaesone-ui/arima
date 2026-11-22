@@ -29,7 +29,7 @@ npm run dev
 
 Use `npm ci` to install the exact dependency graph recorded in the committed `package-lock.json`. When intentionally changing dependencies, update the manifest and lockfile together, then commit both.
 
-The Vite development server listens on `http://localhost:5173` and proxies `/health/*` to the Go API. Start the API separately from the repository root:
+The Vite development server listens on `http://localhost:5173` and proxies both `/health/*` and `/api/*` to the Go API without rewriting paths. The API proxy preserves the bearer `Authorization` header; keep the API upstream private and use the configured OIDC verifier for protected routes. Start the API separately from the repository root:
 
 ```sh
 go run ./cmd/erp-api

@@ -29,6 +29,9 @@ func TestCustomerServiceValidatesInputBeforeDatabaseAccess(t *testing.T) {
 	if _, err := service.Create(context.Background(), principal, "", "corr-1", valid); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("missing idempotency key must be rejected before database access, got %v", err)
 	}
+	if _, err := service.List(context.Background(), principal, -1, ""); !errors.Is(err, ErrInvalidRequest) { t.Fatalf("negative limit must be rejected before database access: %v", err) }
+	if _, err := service.List(context.Background(), principal, 101, ""); !errors.Is(err, ErrInvalidRequest) { t.Fatalf("limit above maximum must be rejected before database access: %v", err) }
+	if _, err := service.List(context.Background(), principal, 25, "not-a-valid-cursor!"); !errors.Is(err, ErrInvalidRequest) { t.Fatalf("invalid cursor must be rejected before database access: %v", err) }
 	if _, err := service.Get(context.Background(), principal, " "); !errors.Is(err, ErrInvalidCustomer) {
 		t.Fatalf("empty external ID must be rejected before database access, got %v", err)
 	}

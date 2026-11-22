@@ -35,7 +35,7 @@ func TestCustomerServicePostgresAtomicCreateAndAuthorization(t *testing.T) {
 	if err := adminDB.PingContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"0001_tenant_foundation.up.sql", "0002_outbox_leases.up.sql", "0003_tenant_authorization.up.sql"} {
+	for _, name := range []string{"0001_tenant_foundation.up.sql", "0002_outbox_leases.up.sql", "0003_tenant_authorization.up.sql", "0004_customer_listing.up.sql"} {
 		migration, err := os.ReadFile("../../migrations/" + name)
 		if err != nil {
 			t.Fatal(err)

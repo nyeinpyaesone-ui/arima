@@ -1,6 +1,6 @@
 # Web deployment boundary
 
-This frontend is a static SPA. The included Nginx template serves the built Vite output and forwards the two implemented API health routes on the same origin.
+This frontend is a static SPA. The included Nginx template serves the built Vite output, forwards authenticated `/api/*` requests unchanged to the private Go API, and forwards the two health routes on the same origin.
 
 ## Required deployment inputs
 
@@ -34,11 +34,12 @@ Copy the built `web/dist/` directory into the configured Nginx document root bef
 | Public path | Behavior |
 |---|---|
 | `/` and SPA routes | Serve the static app; unknown paths fall back to `index.html` |
+| `/api/*` | Proxy to the Go API with the original path and bearer Authorization header preserved |
 | `/health/live` | Proxy to Go API liveness handler |
 | `/health/ready` | Proxy to Go API readiness handler |
 | Other `/health/*` paths | Return 404 |
 
-The API handlers currently return HTTP 200 with JSON status values. Readiness is a scaffold response and does not yet validate database, broker, or other downstream dependencies. Do not interpret it as a production dependency-readiness guarantee.
+The API readiness handler runs the configured dependency check (currently PostgreSQL connectivity when the database is configured). It does not prove outbox delivery, webhook receiver durability, or worker health; monitor those independently.
 
 ## Platform-specific work still required
 

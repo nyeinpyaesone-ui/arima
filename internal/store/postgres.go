@@ -208,7 +208,9 @@ ORDER BY external_id ASC LIMIT $4`, t.tenantID, resourceType, after, limit)
 		}
 		records = append(records, record)
 	}
-	if err := rows.Err(); err != nil { return nil, fmt.Errorf("iterate tenant records: %w", err) }
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenant records: %w", err)
+	}
 	return records, nil
 }
 

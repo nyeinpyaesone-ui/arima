@@ -93,19 +93,34 @@ func (h *customerHandler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *customerHandler) list(w http.ResponseWriter, r *http.Request) {
-	if h.service == nil { http.Error(w, "customer service is not configured", http.StatusServiceUnavailable); return }
+	if h.service == nil {
+		http.Error(w, "customer service is not configured", http.StatusServiceUnavailable)
+		return
+	}
 	limit := 0
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 100 { http.Error(w, "limit must be between 1 and 100", http.StatusBadRequest); return }
+		if err != nil || parsed < 1 || parsed > 100 {
+			http.Error(w, "limit must be between 1 and 100", http.StatusBadRequest)
+			return
+		}
 		limit = parsed
 	}
 	cursor := r.URL.Query().Get("after")
-	if len(cursor) > 512 { http.Error(w, "invalid pagination cursor", http.StatusBadRequest); return }
+	if len(cursor) > 512 {
+		http.Error(w, "invalid pagination cursor", http.StatusBadRequest)
+		return
+	}
 	principal, ok := auth.PrincipalFromContext(r.Context())
-	if !ok { http.Error(w, "unauthorized", http.StatusUnauthorized); return }
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	result, err := h.service.List(r.Context(), principal, limit, cursor)
-	if err != nil { writeCustomerError(w, err); return }
+	if err != nil {
+		writeCustomerError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 

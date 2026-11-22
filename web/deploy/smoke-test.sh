@@ -80,6 +80,13 @@ curl --fail --silent http://127.0.0.1:8080/health/live \
 curl --fail --silent http://127.0.0.1:8080/health/ready \
   | grep -q '"status":"ready"'
 
+# The API route must reach the Go service, not fall through to the SPA.
+api_status="$(curl --silent --output "$tmp_dir/api-response.txt" --write-out '%{http_code}' \
+  -H 'Authorization: Bearer proxy-smoke-test' \
+  http://127.0.0.1:8080/api/v1/me)"
+test "$api_status" = "503"
+grep -q "authentication is not configured" "$tmp_dir/api-response.txt"
+
 unknown_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   http://127.0.0.1:8080/health/not-implemented)"
 test "$unknown_status" = "404"

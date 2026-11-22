@@ -2,6 +2,7 @@ package customer
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +29,7 @@ type Customer struct {
 	Version    int64  `json:"version"`
 }
 
-type customerData struct {
+type CustomerPage struct {\n\tItems []Customer `json:"items"`\n\tNextCursor string `json:"next_cursor"`\n}\n\ntype customerData struct {
 	ExternalID string `json:"external_id"`
 	Name       string `json:"name"`
 	Phone      string `json:"phone,omitempty"`
@@ -113,6 +114,37 @@ func (s *Service) Create(ctx context.Context, principal auth.Principal, idempote
 		return Customer{}, err
 	}
 	return result, nil
+}
+
+// List returns a bounded keyset page of customers for the authenticated tenant.
+// Cursors are opaque base64url encodings of the last external ID and grant no access.
+func (s *Service) List(ctx context.Context, principal auth.Principal, limit int, cursor string) (CustomerPage, error) {
+	if limit == 0 { limit = 25 }
+	if limit < 1 || limit > 100 { return CustomerPage{}, ErrInvalidRequest }
+	after := ""
+	if cursor != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+		if err != nil { return CustomerPage{}, ErrInvalidRequest }
+		after = string(decoded)
+		if after == "" || len(after) > 200 || strings.TrimSpace(after) != after { return CustomerPage{}, ErrInvalidRequest }
+	}
+	page := CustomerPage{Items: make([]Customer, 0, limit)}
+	err := s.repository.WithinTenant(ctx, principal.TenantID, func(tx *store.TenantTx) error {
+		if err := tx.RequirePermission(ctx, principal.Subject, "customer.read"); err != nil { return err }
+		records, err := tx.ListRecords(ctx, "customer", after, limit+1)
+		if err != nil { return err }
+		more := len(records) > limit
+		if more { records = records[:limit] }
+		for _, record := range records {
+			var data customerData
+			if err := json.Unmarshal(record.Payload, &data); err != nil { return fmt.Errorf("decode customer record: %w", err) }
+			page.Items = append(page.Items, Customer{ID: record.ID, TenantID: record.TenantID, ExternalID: data.ExternalID, Name: data.Name, Phone: data.Phone, Email: data.Email, Notes: data.Notes, Version: record.Version})
+		}
+		if more && len(page.Items) > 0 { page.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.Items[len(page.Items)-1].ExternalID)) }
+		return nil
+	})
+	if err != nil { return CustomerPage{}, err }
+	return page, nil
 }
 
 func (s *Service) Get(ctx context.Context, principal auth.Principal, externalID string) (Customer, error) {

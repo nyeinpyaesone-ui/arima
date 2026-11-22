@@ -120,8 +120,10 @@ func (p *Postgres) ListTenantIDs(ctx context.Context, after string, limit int) (
 }
 
 // RequirePermission evaluates a tenant membership and role grant inside the
-// caller's existing business transaction. This prevents authorization from
-// racing a membership revocation between a separate check and a mutation.
+// caller's business transaction. This avoids a separate preflight authorization
+// check, but does not cancel an operation that has already passed this check:
+// a concurrent revocation takes effect for permission checks that run after the
+// revocation commits. Immediate cancellation requires a separate lock protocol.
 func (t *TenantTx) RequirePermission(ctx context.Context, subject, permission string) error {
 	subject = strings.TrimSpace(subject)
 	permission = strings.TrimSpace(permission)

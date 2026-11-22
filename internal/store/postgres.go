@@ -128,24 +128,25 @@ func (t *TenantTx) RequirePermission(ctx context.Context, subject, permission st
 	if subject == "" || len(subject) > 255 || permission == "" || len(permission) > 129 {
 		return ErrPermissionDenied
 	}
-	var allowed bool
+	var matched int
 	err := t.tx.QueryRowContext(ctx, `
-SELECT EXISTS (
-    SELECT 1
-    FROM tenant_memberships membership
-    JOIN tenant_role_permissions role_permission
-      ON role_permission.tenant_id = membership.tenant_id
-     AND role_permission.role_key = membership.role_key
-    WHERE membership.tenant_id = $1::uuid
-      AND membership.subject = $2
-      AND membership.status = 'active'
-      AND role_permission.permission = $3
-)`, t.tenantID, subject, permission).Scan(&allowed)
-	if err != nil {
-		return fmt.Errorf("evaluate tenant permission: %w", err)
-	}
-	if !allowed {
+SELECT 1
+FROM tenant_memberships membership
+JOIN tenant_role_permissions role_permission
+  ON role_permission.tenant_id = membership.tenant_id
+ AND role_permission.role_key = membership.role_key
+WHERE membership.tenant_id = $1::uuid
+  AND membership.subject = $2
+  AND membership.status = 'active'
+  AND role_permission.permission = $3
+LIMIT 1
+FOR SHARE OF membership, role_permission
+`, t.tenantID, subject, permission).Scan(&matched)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrPermissionDenied
+	}
+	if err != nil {
+		return fmt.Errorf("evaluate and lock tenant permission: %w", err)
 	}
 	return nil
 }

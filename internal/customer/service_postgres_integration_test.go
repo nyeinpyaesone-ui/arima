@@ -3,6 +3,7 @@ package customer
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -87,9 +88,15 @@ GRANT SELECT, UPDATE ON outbox_events TO arima_outbox_runtime;`)
 	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_role_permissions (tenant_id, role_key, permission) VALUES ($1::uuid, 'operator', 'customer.read'), ($1::uuid, 'operator', 'customer.write')", tenantA); err != nil {
 		t.Fatalf("seed customer permissions: %v", err)
 	}
-	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_roles (tenant_id, role_key, display_name) VALUES ($1::uuid, 'viewer', 'Viewer')", tenantB); err != nil { t.Fatalf("seed tenant B role: %v", err) }
-	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_role_permissions (tenant_id, role_key, permission) VALUES ($1::uuid, 'viewer', 'customer.read')", tenantB); err != nil { t.Fatalf("seed tenant B permission: %v", err) }
-	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'viewer', 'active')", tenantB); err != nil { t.Fatalf("seed tenant B membership: %v", err) }
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_roles (tenant_id, role_key, display_name) VALUES ($1::uuid, 'viewer', 'Viewer')", tenantB); err != nil {
+		t.Fatalf("seed tenant B role: %v", err)
+	}
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_role_permissions (tenant_id, role_key, permission) VALUES ($1::uuid, 'viewer', 'customer.read')", tenantB); err != nil {
+		t.Fatalf("seed tenant B permission: %v", err)
+	}
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'viewer', 'active')", tenantB); err != nil {
+		t.Fatalf("seed tenant B membership: %v", err)
+	}
 	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'operator', 'active')", tenantA); err != nil {
 		t.Fatalf("seed customer membership: %v", err)
 	}
@@ -139,6 +146,55 @@ GRANT SELECT, UPDATE ON outbox_events TO arima_outbox_runtime;`)
 	}
 	if loaded.ID != created.ID || loaded.Name != created.Name {
 		t.Fatalf("loaded customer differs from created customer: %#v", loaded)
+	}
+
+	// Seed additional rows directly so the test isolates pagination and tenant
+	// filtering from the create/audit/outbox side effects tested above.
+	for _, seed := range []struct {
+		tenantID string
+		customer Customer
+	}{
+		{tenantID: tenantA, customer: Customer{ExternalID: "cust-002", Name: "Second Customer"}},
+		{tenantID: tenantA, customer: Customer{ExternalID: "cust-003", Name: "Third Customer"}},
+		{tenantID: tenantB, customer: Customer{ExternalID: "cust-001", Name: "Other Tenant Customer"}},
+	} {
+		payload, err := json.Marshal(customerData{
+			ExternalID: seed.customer.ExternalID,
+			Name:       seed.customer.Name,
+		})
+		if err != nil {
+			t.Fatalf("marshal integration customer: %v", err)
+		}
+		if _, err := adminDB.ExecContext(ctx, `INSERT INTO tenant_records (tenant_id, resource_type, external_id, payload)
+VALUES ($1::uuid, 'customer', $2, $3::jsonb)`, seed.tenantID, seed.customer.ExternalID, string(payload)); err != nil {
+			t.Fatalf("seed integration customer %s: %v", seed.customer.ExternalID, err)
+		}
+	}
+
+	firstPage, err := service.List(ctx, principal, 2, "")
+	if err != nil {
+		t.Fatalf("list first customer page: %v", err)
+	}
+	if len(firstPage.Items) != 2 || firstPage.Items[0].ExternalID != "cust-001" || firstPage.Items[1].ExternalID != "cust-002" || firstPage.NextCursor == "" {
+		t.Fatalf("unexpected first customer page: %#v", firstPage)
+	}
+	secondPage, err := service.List(ctx, principal, 2, firstPage.NextCursor)
+	if err != nil {
+		t.Fatalf("list second customer page: %v", err)
+	}
+	if len(secondPage.Items) != 1 || secondPage.Items[0].ExternalID != "cust-003" || secondPage.NextCursor != "" {
+		t.Fatalf("unexpected second customer page: %#v", secondPage)
+	}
+
+	otherTenantPage, err := service.List(ctx, auth.Principal{Subject: "customer-user-1", TenantID: tenantB}, 10, "")
+	if err != nil {
+		t.Fatalf("list other tenant customers: %v", err)
+	}
+	if len(otherTenantPage.Items) != 1 || otherTenantPage.Items[0].TenantID != tenantB || otherTenantPage.Items[0].Name != "Other Tenant Customer" {
+		t.Fatalf("tenant B customer list crossed tenant boundary: %#v", otherTenantPage)
+	}
+	if _, err := service.List(ctx, auth.Principal{Subject: "unprovisioned-user", TenantID: tenantA}, 10, ""); !errors.Is(err, store.ErrPermissionDenied) {
+		t.Fatalf("unprovisioned member must not list customers: %v", err)
 	}
 	if _, err := service.Get(ctx, auth.Principal{Subject: "unprovisioned-user", TenantID: tenantA}, input.ExternalID); !errors.Is(err, store.ErrPermissionDenied) {
 		t.Fatalf("unprovisioned member must be denied: %v", err)

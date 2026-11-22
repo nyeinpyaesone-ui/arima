@@ -11,16 +11,16 @@ Required variables:
 
 Configure both or leave both unset outside production. The verified token must contain non-empty `sub` and `tenant_id` claims. Use an access token intended for ARIMA; do not assume an ID token issued to a different client is an acceptable API credential.
 
-## Protected route
+## Protected routes
 
-`GET /api/v1/me` is wired through bearer middleware. Valid credentials return only the verified subject and tenant ID. Health endpoints remain unauthenticated for platform probes. When authentication is absent outside production, protected routes fail closed with 503; missing or invalid credentials return 401.
+`GET /api/v1/me` is wired through bearer middleware. Valid credentials return only the verified subject and tenant ID. Customer create, read and list routes are also wired through bearer middleware and enforce tenant-scoped permissions inside the tenant transaction. Health endpoints remain unauthenticated for platform probes. When authentication is absent outside production, protected routes fail closed with 503; missing or invalid credentials return 401.
 
 ## Security boundaries and limitations
 
 - Signature, issuer, audience, expiry/not-before validation and JWKS refresh are delegated to the vetted OIDC library; the application does not parse JWTs manually.
 - The selected identity provider and its access-token claim contract have not yet been integration-tested. Before production, test invalid signatures, wrong issuer/audience, expiry, not-before, unknown/rotated signing keys, missing tenant claim, provider outage and revocation semantics.
-- A tenant ID claim is an identity attribute, not sufficient authorization. Migration 0003 adds tenant-scoped roles, permissions and membership status under forced RLS. `PostgresAuthorizer` evaluates active membership grants; mutation code must additionally call `TenantTx.RequirePermission` inside the same transaction as the mutation to avoid authorization/revocation races.
-- The PostgreSQL tenant repository and authorization schema are foundational primitives. Customer/business routes are not yet enabled, and no end-to-end ERP production readiness is claimed.
+- A tenant ID claim is an identity attribute, not sufficient authorization. Migration 0003 adds tenant-scoped roles, permissions and membership status under forced RLS. `PostgresAuthorizer` evaluates active membership grants; mutation and list operations additionally call `TenantTx.RequirePermission` inside the same transaction as the data operation to avoid authorization/revocation races.
+- The customer API currently supports tenant-authorized create, read and bounded keyset list operations. Other ERP resource/action routes remain planned contracts; the PostgreSQL tenant repository and authorization schema are foundational primitives, not a complete ERP application.
 - Keep the listener private until identity-provider tests, database grants/RLS tests, authorization, TLS ingress, and operational controls are reviewed.
 
 ## Deployment verification

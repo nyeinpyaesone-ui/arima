@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nyeinpyaesone-ui/arima/internal/auth"
 	"github.com/nyeinpyaesone-ui/arima/internal/store"
@@ -133,7 +134,7 @@ func (s *Service) List(ctx context.Context, principal auth.Principal, limit int,
 	after := ""
 	if cursor != "" {
 		decoded, err := base64.RawURLEncoding.DecodeString(cursor)
-		if err != nil {
+		if err != nil || !utf8.Valid(decoded) {
 			return CustomerPage{}, ErrInvalidRequest
 		}
 		after = string(decoded)

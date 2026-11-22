@@ -113,6 +113,56 @@ GRANT SELECT, UPDATE ON outbox_events TO arima_outbox_runtime;`)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// A permission decision must remain stable until the business transaction
+	// commits. Revocation must wait rather than racing a protected operation.
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'permission-race-user', 'operator', 'active')", tenantA); err != nil {
+		t.Fatalf("seed permission-lock membership: %v", err)
+	}
+	lockConn, err := adminDB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lockConn.Close()
+	if _, err := lockConn.ExecContext(ctx, "SET lock_timeout = '200ms'"); err != nil {
+		t.Fatal(err)
+	}
+	permissionChecked := make(chan struct{})
+	releasePermissionTx := make(chan struct{})
+	permissionTxDone := make(chan error, 1)
+	go func() {
+		permissionTxDone <- repository.WithinTenant(ctx, tenantA, func(tx *store.TenantTx) error {
+			if err := tx.RequirePermission(ctx, "permission-race-user", "customer.read"); err != nil {
+				return err
+			}
+			close(permissionChecked)
+			<-releasePermissionTx
+			return nil
+		})
+	}()
+	select {
+	case <-permissionChecked:
+	case err := <-permissionTxDone:
+		t.Fatalf("permission transaction ended before lock assertion: %v", err)
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for permission check")
+	}
+	_, revokeWhileLockedErr := lockConn.ExecContext(ctx, "UPDATE tenant_memberships SET status = 'inactive' WHERE tenant_id = $1::uuid AND subject = 'permission-race-user'", tenantA)
+	_, resetTimeoutErr := lockConn.ExecContext(ctx, "SET lock_timeout = '0'")
+	close(releasePermissionTx)
+	if txErr := <-permissionTxDone; txErr != nil {
+		t.Fatalf("permission transaction failed: %v", txErr)
+	}
+	if resetTimeoutErr != nil {
+		t.Fatalf("reset permission-lock test timeout: %v", resetTimeoutErr)
+	}
+	if revokeWhileLockedErr == nil || !strings.Contains(revokeWhileLockedErr.Error(), "lock timeout") {
+		t.Fatalf("membership revocation should wait for the protected transaction; got %v", revokeWhileLockedErr)
+	}
+	if _, err := lockConn.ExecContext(ctx, "UPDATE tenant_memberships SET status = 'inactive' WHERE tenant_id = $1::uuid AND subject = 'permission-race-user'", tenantA); err != nil {
+		t.Fatalf("membership revocation should succeed after protected transaction commits: %v", err)
+	}
+
 	service, err := NewService(repository)
 	if err != nil {
 		t.Fatal(err)

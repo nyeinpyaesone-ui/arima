@@ -23,9 +23,11 @@ From this directory:
 
 ```sh
 cp .env.example .env
-npm install
+npm ci
 npm run dev
 ```
+
+Use `npm ci` to install the exact dependency graph recorded in the committed `package-lock.json`. When intentionally changing dependencies, update the manifest and lockfile together, then commit both.
 
 The Vite development server listens on `http://localhost:5173` and proxies `/health/*` to the Go API. Start the API separately from the repository root:
 

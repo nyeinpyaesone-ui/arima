@@ -7,6 +7,7 @@ Migrations are controlled deployment steps. The API never mutates the database s
 1. `0001_tenant_foundation.up.sql` creates tenants, tenant-scoped records, forced PostgreSQL RLS, audit events, idempotency keys and the transactional outbox.
 2. `0002_outbox_leases.up.sql` adds worker lease ownership and expiry metadata so abandoned deliveries can be safely reclaimed.
 3. `0003_tenant_authorization.up.sql` adds tenant-scoped roles, permissions and active/suspended/revoked memberships, all protected by forced RLS.
+4. `0004_customer_listing.up.sql` adds an index for customer keyset pagination by external ID.
 
 Apply in order to a disposable/test database, then a reviewed staging environment, before production:
 
@@ -14,6 +15,7 @@ Apply in order to a disposable/test database, then a reviewed staging environmen
 psql "$ARIMA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0001_tenant_foundation.up.sql
 psql "$ARIMA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0002_outbox_leases.up.sql
 psql "$ARIMA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0003_tenant_authorization.up.sql
+psql "$ARIMA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0004_customer_listing.up.sql
 ```
 
 Use a dedicated migration role with the privileges needed to create the extension and schema. The runtime role must be separate and least-privileged, must not be a superuser, and must not have `BYPASSRLS`. Grant only the table operations required by the deployed application and worker. Verify actual grants and RLS behavior under the runtime role before production.

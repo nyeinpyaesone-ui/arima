@@ -196,7 +196,9 @@ func (t *TenantTx) ListRecords(ctx context.Context, resourceType, after string, 
 FROM tenant_records
 WHERE tenant_id = $1::uuid AND resource_type = $2 AND ($3 = '' OR external_id > $3)
 ORDER BY external_id ASC LIMIT $4`, t.tenantID, resourceType, after, limit)
-	if err != nil { return nil, fmt.Errorf("list tenant records: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("list tenant records: %w", err)
+	}
 	defer rows.Close()
 	records := make([]Record, 0, limit)
 	for rows.Next() {

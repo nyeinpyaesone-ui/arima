@@ -94,7 +94,7 @@ GRANT SELECT, UPDATE ON outbox_events TO arima_outbox_runtime;`)
 	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_role_permissions (tenant_id, role_key, permission) VALUES ($1::uuid, 'viewer', 'customer.read')", tenantB); err != nil {
 		t.Fatalf("seed tenant B permission: %v", err)
 	}
-	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'viewer', 'active')", tenantB); err != nil {
+	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'tenant-b-reader', 'viewer', 'active')", tenantB); err != nil {
 		t.Fatalf("seed tenant B membership: %v", err)
 	}
 	if _, err := adminDB.ExecContext(ctx, "INSERT INTO tenant_memberships (tenant_id, subject, role_key, status) VALUES ($1::uuid, 'customer-user-1', 'operator', 'active')", tenantA); err != nil {
@@ -186,7 +186,7 @@ VALUES ($1::uuid, 'customer', $2, $3::jsonb)`, seed.tenantID, seed.customer.Exte
 		t.Fatalf("unexpected second customer page: %#v", secondPage)
 	}
 
-	otherTenantPage, err := service.List(ctx, auth.Principal{Subject: "customer-user-1", TenantID: tenantB}, 10, "")
+	otherTenantPage, err := service.List(ctx, auth.Principal{Subject: "tenant-b-reader", TenantID: tenantB}, 10, "")
 	if err != nil {
 		t.Fatalf("list other tenant customers: %v", err)
 	}

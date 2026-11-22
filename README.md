@@ -62,7 +62,6 @@ Apply the reviewed migrations in order:
 1. migrations/0001_tenant_foundation.up.sql
 2. migrations/0002_outbox_leases.up.sql
 3. migrations/0003_tenant_authorization.up.sql
-4. migrations/0004_customer_listing.up.sql
 
 The API never runs migrations at startup. Use a dedicated migration identity. API and worker runtime identities must be NOSUPERUSER and NOBYPASSRLS. The API role requires read-only access to tenant role/membership tables and only required business DML. The worker role requires SELECT on tenants and SELECT/UPDATE on outbox_events; it must not receive business-record or membership administration access.
 

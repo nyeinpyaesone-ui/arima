@@ -2,6 +2,7 @@ package customer
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -38,6 +39,10 @@ func TestCustomerServiceValidatesInputBeforeDatabaseAccess(t *testing.T) {
 	}
 	if _, err := service.List(context.Background(), principal, 25, "not-a-valid-cursor!"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("invalid cursor must be rejected before database access: %v", err)
+	}
+	invalidUTF8Cursor := base64.RawURLEncoding.EncodeToString([]byte{0xff, 0xfe})
+	if _, err := service.List(context.Background(), principal, 25, invalidUTF8Cursor); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("cursor containing invalid UTF-8 must be rejected before database access: %v", err)
 	}
 	if _, err := service.List(context.Background(), principal, 25, strings.Repeat("a", 513)); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("oversized cursor must be rejected before database access: %v", err)

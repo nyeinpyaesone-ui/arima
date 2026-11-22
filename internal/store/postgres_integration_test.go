@@ -36,7 +36,7 @@ func TestPostgresTenantIsolationAndAtomicControls(t *testing.T) {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, migrationName := range []string{"0001_tenant_foundation.up.sql", "0002_outbox_leases.up.sql", "0003_tenant_authorization.up.sql", "0004_customer_listing.up.sql"} {
+	for _, migrationName := range []string{"0001_tenant_foundation.up.sql", "0002_outbox_leases.up.sql", "0003_tenant_authorization.up.sql"} {
 		migration, err := os.ReadFile("../../migrations/" + migrationName)
 		if err != nil {
 			t.Fatal(err)

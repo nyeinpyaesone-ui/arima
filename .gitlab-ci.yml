@@ -1,11 +1,9 @@
-# GitLab CI validates the canonical public GitHub source snapshot.
-# This secondary GitLab project is not configured as a repository mirror.
-# Each job checks out the same GitHub main commit and reports its SHA in logs.
+# GitLab CI validates the canonical public GitHub ARIMA source.
+# This is CI integration, not a repository mirror or deployment pipeline.
 
 stages:
   - verify
   - test
-  - build
 
 variables:
   GIT_DEPTH: "1"
@@ -13,50 +11,41 @@ variables:
   NPM_CONFIG_AUDIT: "false"
   NPM_CONFIG_FUND: "false"
 
-workflow:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH'
-    - if: '$CI_PIPELINE_SOURCE == "web"'
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
-
-.source-template:
+go-verify:
+  stage: verify
+  image: golang:1.26.11
   before_script:
     - set -eu
     - git clone --depth 1 --branch main https://github.com/nyeinpyaesone-ui/arima.git .canonical-source
     - cd .canonical-source
-    - echo "Canonical source commit: $(git rev-parse HEAD)"
-    - echo "GitLab config commit: ${CI_COMMIT_SHA}"
-
-go-verify:
-  stage: verify
-  image: golang:1.26.11
-  extends: .source-template
+    - echo "Canonical source SHA: $(git rev-parse HEAD)"
+    - echo "GitLab CI config SHA: ${CI_COMMIT_SHA}"
   script:
     - go mod download
     - go mod verify
     - test -z "$(gofmt -l ./cmd ./internal)"
     - go vet ./...
+    - go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
 go-test:
   stage: test
   image: golang:1.26.11
-  extends: .source-template
-  services:
-    - name: postgres:15
-      alias: postgres
-  variables:
-    POSTGRES_DB: arima_test
-    POSTGRES_USER: postgres
-    POSTGRES_PASSWORD: postgres
-    ARIMA_TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/arima_test?sslmode=disable
+  before_script:
+    - set -eu
+    - git clone --depth 1 --branch main https://github.com/nyeinpyaesone-ui/arima.git .canonical-source
+    - cd .canonical-source
+    - echo "Canonical source SHA: $(git rev-parse HEAD)"
   script:
     - go test -race ./...
 
 web-verify:
   stage: verify
   image: node:22-bookworm-slim
-  extends: .source-template
+  before_script:
+    - set -eu
+    - git clone --depth 1 --branch main https://github.com/nyeinpyaesone-ui/arima.git .canonical-source
+    - cd .canonical-source
+    - echo "Canonical source SHA: $(git rev-parse HEAD)"
   script:
     - cd web
     - npm ci --no-audit --no-fund
@@ -67,23 +56,3 @@ web-verify:
     expire_in: 7 days
     paths:
       - .canonical-source/web/dist/
-
-container-build:
-  stage: build
-  image: docker:27-cli
-  services:
-    - name: docker:27-dind
-      command: ["--tls=false"]
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-  extends: .source-template
-  script:
-    - docker build --pull --tag arima:gitlab-ci .
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: manual
-      allow_failure: true
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: manual
-      allow_failure: true

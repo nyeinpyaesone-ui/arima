@@ -18,8 +18,8 @@ go-verify:
     - set -eu
     - git clone --depth 1 --branch main https://github.com/nyeinpyaesone-ui/arima.git .canonical-source
     - cd .canonical-source
-    - echo "Canonical source SHA: $(git rev-parse HEAD)"
-    - echo "GitLab CI config SHA: ${CI_COMMIT_SHA}"
+    - echo "Canonical source SHA $(git rev-parse HEAD)"
+    - echo "GitLab CI config SHA ${CI_COMMIT_SHA}"
   script:
     - go mod download
     - go mod verify
@@ -34,7 +34,7 @@ go-test:
     - set -eu
     - git clone --depth 1 --branch main https://github.com/nyeinpyaesone-ui/arima.git .canonical-source
     - cd .canonical-source
-    - echo "Canonical source SHA: $(git rev-parse HEAD)"
+    - echo "Canonical source SHA $(git rev-parse HEAD)"
   script:
     - go test -race ./...
 
@@ -45,7 +45,7 @@ web-verify:
     - set -eu
     - git clone --depth 1 --branch main https://github.com/nyeinpyaesone-ui/arima.git .canonical-source
     - cd .canonical-source
-    - echo "Canonical source SHA: $(git rev-parse HEAD)"
+    - echo "Canonical source SHA $(git rev-parse HEAD)"
   script:
     - cd web
     - npm ci --no-audit --no-fund

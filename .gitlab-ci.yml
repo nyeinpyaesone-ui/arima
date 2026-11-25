@@ -62,4 +62,4 @@ runner-smoke:
   image: alpine:3.20
   script:
     - echo "GitLab shared-runner execution is available"
-    - echo "Pipeline SHA: ${CI_COMMIT_SHA}"
+    - echo "Pipeline SHA ${CI_COMMIT_SHA}"

@@ -56,3 +56,10 @@ web-verify:
     expire_in: 7 days
     paths:
       - .canonical-source/web/dist/
+
+runner-smoke:
+  stage: verify
+  image: alpine:3.20
+  script:
+    - echo "GitLab shared-runner execution is available"
+    - echo "Pipeline SHA: ${CI_COMMIT_SHA}"

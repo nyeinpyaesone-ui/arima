@@ -28,9 +28,9 @@ jobs:
   build-and-deploy-staging:
     name: Build staging preview or deploy reviewed image
     if: >-
-      github.ref == 'refs/heads/main' &&
-      (inputs.mode == 'preview' ||
-       (inputs.mode == 'deploy' && inputs.acknowledge == true))
+      inputs.mode == 'preview' ||
+      (github.ref == 'refs/heads/main' &&
+       inputs.mode == 'deploy' && inputs.acknowledge == true)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     environment: staging

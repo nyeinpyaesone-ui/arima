@@ -1,0 +1,97 @@
+name: GitLab canonical validation
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitlab-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Trigger GitLab with the exact GitHub commit and wait for its result
+        shell: bash
+        env:
+          GITLAB_API_TOKEN: ${{ secrets.GITLAB_API_TOKEN }}
+          GITLAB_PROJECT_ID: "85323260"
+          GITLAB_CONFIG_REF: "chore/github-source-ci"
+          ARIMA_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GITLAB_API_TOKEN}" ]]; then
+            echo "::error::Missing GitHub Actions secret GITLAB_API_TOKEN. Configure a restricted GitLab project access token with pipeline API access."
+            exit 1
+          fi
+          if [[ ! "${ARIMA_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid canonical GitHub source SHA."
+            exit 1
+          fi
+
+          payload="$(jq -n \
+            --arg ref "${GITLAB_CONFIG_REF}" \
+            --arg sha "${ARIMA_SOURCE_SHA}" \
+            '{ref: $ref, inputs: {arima_source_sha: $sha}}')"
+
+          response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "${payload}" \
+            "https://gitlab.com/api/v4/projects/${GITLAB_PROJECT_ID}/pipeline")"
+
+          pipeline_id="$(jq -er '.id' <<<"${response}")"
+          pipeline_url="$(jq -er '.web_url' <<<"${response}")"
+          pipeline_name="$(jq -er '.name' <<<"${response}")"
+          expected_name="ARIMA canonical ${ARIMA_SOURCE_SHA}"
+
+          if [[ "${pipeline_name}" != "${expected_name}" ]]; then
+            echo "::error::GitLab pipeline identity mismatch. Expected '${expected_name}', received '${pipeline_name}'."
+            exit 1
+          fi
+
+          echo "GitLab pipeline: ${pipeline_url}"
+          echo "Canonical source SHA: ${ARIMA_SOURCE_SHA}"
+
+          for attempt in $(seq 1 180); do
+            pipeline="$(curl --fail-with-body --silent --show-error \
+              --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+              "https://gitlab.com/api/v4/projects/${GITLAB_PROJECT_ID}/pipelines/${pipeline_id}")"
+            status="$(jq -er '.status' <<<"${pipeline}")"
+            current_name="$(jq -er '.name' <<<"${pipeline}")"
+
+            if [[ "${current_name}" != "${expected_name}" ]]; then
+              echo "::error::GitLab pipeline identity changed while polling."
+              exit 1
+            fi
+
+            case "${status}" in
+              success)
+                echo "GitLab validation passed for ${ARIMA_SOURCE_SHA}."
+                exit 0
+                ;;
+              failed|canceled|skipped)
+                echo "::error::GitLab validation finished with status: ${status}"
+                exit 1
+                ;;
+              created|pending|preparing|running|waiting_for_resource|scheduled|manual)
+                sleep 10
+                ;;
+              *)
+                echo "::error::Unexpected GitLab pipeline status: ${status}"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for GitLab validation. Check the pipeline directly."
+          exit 1

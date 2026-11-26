@@ -62,7 +62,7 @@ jobs:
           echo "GitLab pipeline: ${pipeline_url}"
           echo "Canonical source SHA: ${ARIMA_SOURCE_SHA}"
 
-          for attempt in $(seq 1 180); do
+          for _ in $(seq 1 180); do
             pipeline="$(curl --fail-with-body --silent --show-error \
               --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
               "https://gitlab.com/api/v4/projects/${GITLAB_PROJECT_ID}/pipelines/${pipeline_id}")"

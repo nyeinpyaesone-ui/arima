@@ -34,6 +34,8 @@ jobs:
       ARIMA_CUSTOMER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/arima_customer_test?sslmode=disable
       ARIMA_CUSTOMER_TEST_RUNTIME_DATABASE_URL: postgres://arima_customer_runtime:arima_customer_test_password@localhost:5432/arima_customer_test?sslmode=disable
       ARIMA_CUSTOMER_TEST_WORKER_DATABASE_URL: postgres://arima_outbox_runtime:arima_outbox_test_password@localhost:5432/arima_customer_test?sslmode=disable
+      ARIMA_OUTBOX_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/arima_outbox_test?sslmode=disable
+      ARIMA_OUTBOX_TEST_RUNTIME_DATABASE_URL: postgres://arima_outbox_runtime:arima_outbox_test_password@localhost:5432/arima_outbox_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,6 +48,13 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: psql "$ARIMA_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE arima_customer_test"
+      - name: Create isolated outbox worker integration database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql "$ARIMA_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE arima_outbox_test"
+          psql "$ARIMA_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE arima_outbox_runtime LOGIN PASSWORD 'arima_outbox_test_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+          psql "$ARIMA_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE arima_outbox_test TO arima_outbox_runtime"
       - name: Validate local Compose and bootstrap scripts
         run: |
           sh -n scripts/migrate-local.sh

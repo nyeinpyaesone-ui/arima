@@ -1,49 +1,64 @@
 # Staging container deployment
 
-## What this workflow does
+## Current status
 
-`.github/workflows/staging-deploy.yml` is a manually triggered, staging-only pipeline. It must be dispatched from `main`. It builds the existing root `Dockerfile` for Linux amd64 and arm64, publishes an immutable commit-tagged image to GHCR, requests a rollout of that exact image digest through a provider adapter, then polls the existing `/health/ready` endpoint. It never deploys production or applies database migrations.
+The repository contains a **staging deployment workflow contract**, not a completed provider integration. `.github/workflows/staging-deploy.yml` is manually dispatched from `main`, requires an explicit acknowledgement, builds the existing root Dockerfile for Linux AMD64 and ARM64, publishes a commit-tagged image to GHCR, requests a rollout of the exact image digest through a provider adapter, and verifies the exact commit/digest plus API and worker readiness.
+
+The workflow cannot complete until the staging environment, provider adapter, secrets, variables, registry pull access, and aggregate health endpoint are configured and tested. It does not deploy production or run database migrations. A successful adapter HTTP response alone is not deployment success; the post-rollout aggregate readiness check is required.
 
 ## Repository compatibility verified
 
 - Go API entry point: `cmd/erp-api`; default listen address `:8080`.
 - Existing multi-stage root `Dockerfile` emits a non-root distroless image and exposes port 8080.
-- Existing health endpoints: `/health/live` and `/health/ready`.
-- Current app health handlers report process-level status; readiness does not prove database connectivity or application-level readiness.
-- CI currently tests, vets, formats, and builds the Go API. It does not yet build/test the container image as part of PR CI.
-- PR #3 adds environment preflight and development-flow docs, not a deployment integration.
+- API health endpoints: `/health/live` and `/health/ready`.
+- Worker health endpoints are private on port 8081.
+- API readiness checks configured PostgreSQL connectivity; worker readiness checks its worker database connection. Neither proves webhook delivery.
+- The image contains both `/erp-api` and `/outbox-worker`; the worker must run as a separate service with its entrypoint overridden to `/outbox-worker`.
 
 ## Required staging setup
 
-Create a GitHub Environment named `staging`. Keep deployment secrets scoped to that environment.
+Create a GitHub Environment named `staging`. Configure environment protection rules in GitHub Settings; referencing an environment in YAML does not by itself require an approval. Restrict who can deploy and, where supported by the repository plan, require an independent reviewer.
 
-- Secret `STAGING_DEPLOY_HOOK_URL`: HTTPS endpoint for a **trusted deployment adapter** that accepts a POST JSON payload with `image`, `digest`, `commit`, and `environment`, and deploys the exact digest. A generic provider deploy hook is not automatically compatible with this contract; implement/configure an adapter for the chosen vendor before enabling this workflow.
-- Variable `STAGING_HEALTHCHECK_URL`: HTTPS URL for a provider adapter's **aggregate staging status** endpoint, reachable from GitHub-hosted runners. It must return JSON with both `api.status` and `worker.status` set to `ready` only after the exact image digest is deployed and both services are healthy. The app's API `/health/ready` endpoint alone is insufficient.
-- Ensure the container platform can pull private `ghcr.io/nyeinpyaesone-ui/arima` images, or configure package visibility intentionally.
-- Configure the container service to listen on port 8080 and inject `ARIMA_ADDR=:8080` (or the platform's supported port mapping).
+Configure only these workflow integration values in the `staging` Environment:
 
-## PostgreSQL hosted on the deployment host
+- Secret `STAGING_DEPLOY_HOOK_URL`: HTTPS endpoint for a trusted deployment adapter.
+- Secret `STAGING_DEPLOY_TOKEN`: dedicated token accepted only by that adapter, scoped to staging rollout operations.
+- Variable `STAGING_HEALTHCHECK_URL`: HTTPS aggregate status endpoint reachable from GitHub-hosted runners.
 
-The database URL belongs in the managed platform's secret/configuration store as `ARIMA_DATABASE_URL`; it must not be copied into GitHub workflow variables or deployment payloads. Before rollout, establish and test a private network path from the managed container runtime to the PostgreSQL host (private networking, VPN, or a tightly restricted TLS endpoint). Use TLS certificate verification, firewall allow-listing, a dedicated least-privilege runtime role, and a separate migration identity. Do not expose PostgreSQL broadly to the public internet. The current service scaffold's readiness endpoint does not test database connectivity, so database connectivity and migrations must be validated separately before claiming staging readiness.
+The adapter must accept a POST JSON request containing `image`, `digest`, `commit`, `environment`, and the API/worker service specifications. It must reject any environment other than staging, enforce an allow-list for this repository and image, deploy the supplied immutable digest, and never log the bearer token or secret configuration.
 
-## Safe rollout contract
+The aggregate health endpoint must return JSON with this contract:
 
-The adapter must:
-1. Authenticate requests and accept only the staging environment.
-2. Validate the repository/image allow-list and deploy the supplied immutable digest, not a mutable tag.
-3. Keep the prior known-good revision and expose a rollback operation.
-4. Return success only after the platform accepts the exact digest.
-5. Avoid logging the hook URL, credentials, or database DSN.
+```json
+{
+  "commit": "<deployed Git commit SHA>",
+  "digest": "sha256:<deployed OCI image digest>",
+  "api": { "status": "ready" },
+  "worker": { "status": "ready" }
+}
+```
 
-The workflow currently sends no production credentials, grants no cloud-wide permissions, and has no production environment/job. It uses `GITHUB_TOKEN` only to publish the image to GHCR. The configured adapter must be reviewed and tested before the manual workflow is used. The aggregate readiness endpoint must expose a response such as `{\"api\":{\"status\":\"ready\"},\"worker\":{\"status\":\"ready\"}}`; it must not report ready until both API and worker readiness checks pass.
+The endpoint must report ready only when the exact requested commit and digest are running and both services pass their readiness checks. The worker probe must remain private; the aggregate endpoint may report its result without exposing the worker port publicly.
+
+Ensure the container platform can pull `ghcr.io/nyeinpyaesone-ui/arima`. Configure the API service to listen on port 8080 and the worker service to use the image entrypoint `/outbox-worker` with its private health port on 8081.
+
+## Database and migration requirements
+
+Keep `ARIMA_DATABASE_URL` and `ARIMA_OUTBOX_DATABASE_URL` in the hosting provider's secret manager, not in workflow variables or the deployment payload. Use private networking or a tightly restricted TLS endpoint, certificate verification, firewall allow-listing, and dedicated least-privilege runtime roles. Use a separate migration identity.
+
+The application does not run migrations at startup. Database migrations must be applied as a separately reviewed, observable operation before any release that requires schema changes. Verify backups and restore procedures before relying on the environment.
+
+## Rollback and failure handling
+
+The current workflow detects failure to confirm readiness, but it does **not** automatically roll back. Before using it, document and test the provider's rollback operation, retain the last known-good image digest and configuration, and assign a responsible operator. Do not report a release as deployed based only on an accepted HTTP request.
 
 ## Remaining readiness blockers
 
-- Name the managed container provider and implement its authenticated adapter/API contract.
-- Confirm GHCR package permissions and provider private-image pull credentials.
-- Validate PostgreSQL host routing, TLS, firewall, backup/restore, migration execution and restore drills.
-- Add DB-aware readiness only when it can be implemented safely and tested; current `/health/ready` is process-level only.
-- Remediate any dependency vulnerabilities and add image vulnerability scanning/signature verification before production consideration.
-- Add end-to-end deployment tests, rollback rehearsal, alerting, and evidence from a successful staging rehearsal.
+- Select the actual hosting/container provider and implement its adapter to the contract above.
+- Configure the GitHub `staging` Environment, protection rules, scoped secrets and variables.
+- Confirm private GHCR pull permissions for the deployment platform.
+- Verify PostgreSQL network access, TLS, role separation, backups and restore.
+- Implement and test aggregate health reporting for the exact image digest and commit.
+- Rehearse deployment and rollback; capture platform logs, health evidence and release identity.
 
-Production deployment remains intentionally out of scope.
+Production deployment remains intentionally unconfigured.

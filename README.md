@@ -28,7 +28,6 @@ Compose starts PostgreSQL, applies migrations 0001–0003 once using a migration
 
 For local Go checks, run `go mod download`, `go mod verify`, `make check`, and `go run ./cmd/erp-api`. Without a configured OIDC provider, customer routes remain inaccessible (fail closed). Provision a real development tenant membership for the exact OIDC subject before testing customer access.
 
-
 ## API routes
 
 | Method | Path | Required permission | Purpose |
@@ -77,9 +76,13 @@ Required worker environment:
 
 The webhook receiver must durably accept events and deduplicate using the event ID supplied in Idempotency-Key and X-ARIMA-Event-ID. Delivery is at-least-once, not exactly-once. 2xx means durable acceptance; 429/5xx are retried, other non-2xx responses are dead-lettered. Do not log tokens or full event payloads.
 
-## CI and release boundary
+## CI, image publishing and deployment boundary
 
-PR CI runs workflow lint, module integrity/tidy checks, formatting, vet, vulnerability scanning, race-enabled PostgreSQL integration tests and a Linux binary build. Container validation builds both Linux AMD64 and ARM64 images without publishing on pull requests. GHCR publishing is limited to pushes on main. Staging deployment is manually dispatched from main and requires a protected staging environment and a reviewed provider adapter. No production deployment is configured by this baseline.
+- Pull requests run Go/PostgreSQL integration checks, formatting, vet, vulnerability scanning, workflow lint and Linux binary builds. The container workflow separately validates AMD64 and ARM64 images without publishing them.
+- Pushes to `main` publish commit-tagged multi-architecture images to GHCR with SBOM and provenance attestations.
+- `staging-deploy.yml` is the single manual staging rollout workflow. It is gated to `main`, requires explicit dispatch acknowledgement, validates its adapter settings before publishing, deploys an immutable image digest, and verifies that the same commit/digest and both API and worker report ready.
+- The staging workflow is **not an operational deployment yet**. It requires a provider-specific adapter, a configured GitHub `staging` Environment, environment-scoped secrets/variables, registry pull access, and an aggregate health endpoint. Refer to [staging deployment](docs/staging-container-deployment.md).
+- No production deployment or automatic production promotion is configured.
 
 ## Documentation
 
@@ -88,6 +91,7 @@ PR CI runs workflow lint, module integrity/tidy checks, formatting, vet, vulnera
 - [Database migrations](migrations/README.md)
 - [Tenant access provisioning](docs/runbooks/tenant-access-provisioning.md)
 - [Staging deployment](docs/runbooks/staging-deployment.md)
+- [Staging container deployment contract](docs/staging-container-deployment.md)
 - [OpenAPI contract](api/openapi/openapi.yaml)
 
 ## Layout

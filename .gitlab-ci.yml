@@ -7,6 +7,7 @@ spec:
       description: "Exact canonical commit SHA from nyeinpyaesone-ui/arima."
 ---
 workflow:
+  name: "ARIMA canonical $[[ inputs.arima_source_sha ]]"
   rules:
     - if: '$CI_PIPELINE_SOURCE == "trigger" || $CI_PIPELINE_SOURCE == "api"'
     - when: never

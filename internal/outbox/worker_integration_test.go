@@ -27,7 +27,7 @@ type permanentDeliveryError struct{}
 
 func (permanentDeliveryError) Error() string    { return "permanent rejection" }
 func (permanentDeliveryError) Code() string     { return "test_rejected" }
-func (permanentDeliveryError) Permanent() bool { return true }
+func (permanentDeliveryError) Permanent() bool  { return true }
 
 type retryableDeliveryError struct{}
 

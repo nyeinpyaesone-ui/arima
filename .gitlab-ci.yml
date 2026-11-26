@@ -1,5 +1,5 @@
-# GitLab CI validates the canonical public GitHub ARIMA source.
-# This is CI integration, not a repository mirror or deployment pipeline.
+# GitLab CI validates the exact commit represented by the GitLab pipeline
+# against the canonical public GitHub repository. This is not a mirror/deploy job.
 
 stages:
   - verify
@@ -11,16 +11,27 @@ variables:
   NPM_CONFIG_AUDIT: "false"
   NPM_CONFIG_FUND: "false"
 
+.canonical_checkout:
+  before_script:
+    - |
+      set -eu
+      canonical_sha="${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-$CI_COMMIT_SHA}"
+      git init .canonical-source
+      git -C .canonical-source remote add origin https://github.com/nyeinpyaesone-ui/arima.git
+      git -C .canonical-source fetch --no-tags --depth=1 origin "$canonical_sha"
+      git -C .canonical-source checkout --detach FETCH_HEAD
+      checked_out_sha="$(git -C .canonical-source rev-parse HEAD)"
+      test "$checked_out_sha" = "$canonical_sha"
+      echo "Canonical GitHub source SHA: $checked_out_sha"
+      echo "GitLab pipeline SHA: $CI_COMMIT_SHA"
+      echo "GitLab MR source SHA: ${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-not-an-MR-pipeline}"
+
 go-verify:
+  extends: .canonical_checkout
   stage: verify
   image: golang:1.26.11
-  before_script:
-    - set -eu
-    - git clone --depth 1 --branch main https://github.com/nyeinpyaesone-ui/arima.git .canonical-source
-    - cd .canonical-source
-    - echo "Canonical source SHA $(git rev-parse HEAD)"
-    - echo "GitLab CI config SHA ${CI_COMMIT_SHA}"
   script:
+    - cd .canonical-source
     - go mod download
     - go mod verify
     - test -z "$(gofmt -l ./cmd ./internal)"
@@ -28,26 +39,19 @@ go-verify:
     - go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
 go-test:
+  extends: .canonical_checkout
   stage: test
   image: golang:1.26.11
-  before_script:
-    - set -eu
-    - git clone --depth 1 --branch main https://github.com/nyeinpyaesone-ui/arima.git .canonical-source
-    - cd .canonical-source
-    - echo "Canonical source SHA $(git rev-parse HEAD)"
   script:
+    - cd .canonical-source
     - go test -race ./...
 
 web-verify:
+  extends: .canonical_checkout
   stage: verify
   image: node:22-bookworm-slim
-  before_script:
-    - set -eu
-    - git clone --depth 1 --branch main https://github.com/nyeinpyaesone-ui/arima.git .canonical-source
-    - cd .canonical-source
-    - echo "Canonical source SHA $(git rev-parse HEAD)"
   script:
-    - cd web
+    - cd .canonical-source/web
     - npm ci --no-audit --no-fund
     - npm run typecheck
     - npm run build
@@ -62,4 +66,4 @@ runner-smoke:
   image: alpine:3.20
   script:
     - echo "GitLab shared-runner execution is available"
-    - echo "Pipeline SHA ${CI_COMMIT_SHA}"
+    - echo "Pipeline SHA $CI_COMMIT_SHA"

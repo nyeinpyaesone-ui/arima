@@ -2,6 +2,13 @@ name: Staging Container Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      acknowledge:
+        description: Confirm a staging-only rollout from the selected main commit
+        required: true
+        type: choice
+        options:
+          - "I confirm staging deployment"
 
 permissions:
   contents: read
@@ -12,19 +19,49 @@ concurrency:
 
 jobs:
   build-and-deploy-staging:
-    name: Build immutable image and request staging rollout
-    if: github.ref == 'refs/heads/main'
+    name: Build, publish, request rollout, and verify staging
+    if: github.ref == 'refs/heads/main' && inputs.acknowledge == 'I confirm staging deployment'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     environment: staging
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Checkout reviewed main commit
+      - name: Checkout selected main commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate staging adapter configuration
+        env:
+          STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+          STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
+          STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_DEPLOY_HOOK_URL" || {
+            echo "::error::Missing staging environment secret STAGING_DEPLOY_HOOK_URL."
+            exit 1
+          }
+          test -n "$STAGING_DEPLOY_TOKEN" || {
+            echo "::error::Missing staging environment secret STAGING_DEPLOY_TOKEN."
+            exit 1
+          }
+          test -n "$STAGING_HEALTHCHECK_URL" || {
+            echo "::error::Missing staging environment variable STAGING_HEALTHCHECK_URL."
+            exit 1
+          }
+          case "$STAGING_DEPLOY_HOOK_URL" in
+            https://*) ;;
+            *) echo "::error::STAGING_DEPLOY_HOOK_URL must use HTTPS."; exit 1 ;;
+          esac
+          case "$STAGING_HEALTHCHECK_URL" in
+            https://*) ;;
+            *) echo "::error::STAGING_HEALTHCHECK_URL must use HTTPS."; exit 1 ;;
+          esac
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -36,7 +73,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish immutable staging image
+      - name: Build and publish immutable multi-architecture image
         id: image
         uses: docker/build-push-action@v6
         with:
@@ -50,30 +87,17 @@ jobs:
           sbom: true
           provenance: mode=max
 
-      - name: Validate staging deployment integration
+      - name: Validate image digest
         env:
-          STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
-          STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
-          STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
-        shell: bash
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           set -euo pipefail
-          test -n "$STAGING_DEPLOY_HOOK_URL" || {
-            echo "::error::Configure staging environment secret STAGING_DEPLOY_HOOK_URL."
-            exit 1
-          }
-          test -n "$STAGING_DEPLOY_TOKEN" || {
-            echo "::error::Configure staging environment secret STAGING_DEPLOY_TOKEN."
-            exit 1
-          }
-          test -n "$STAGING_HEALTHCHECK_URL" || {
-            echo "::error::Configure staging environment variable STAGING_HEALTHCHECK_URL."
-            exit 1
-          }
-          case "$STAGING_DEPLOY_HOOK_URL" in https://*) ;; *) echo "::error::Deployment hook must use HTTPS."; exit 1;; esac
-          case "$STAGING_HEALTHCHECK_URL" in https://*) ;; *) echo "::error::Health-check URL must use HTTPS."; exit 1;; esac
+          case "$IMAGE_DIGEST" in
+            sha256:*) ;;
+            *) echo "::error::Build did not return a valid sha256 image digest."; exit 1 ;;
+          esac
 
-      - name: Request staging rollout of exact image
+      - name: Request staging rollout of exact image digest
         env:
           STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
           STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
@@ -82,54 +106,58 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          payload="$(jq -cn \
-            --arg image "$IMAGE_REF" \
-            --arg digest "$IMAGE_DIGEST" \
-            --arg commit "$GITHUB_SHA" \
-            '{
+          payload="$(jq -cn             --arg image "$IMAGE_REF"             --arg digest "$IMAGE_DIGEST"             --arg commit "$GITHUB_SHA"             '{
               image:$image,
               digest:$digest,
               commit:$commit,
               environment:"staging",
               services:[
-                {name:"api",entrypoint:"/erp-api",required_environment:["ARIMA_ENV","ARIMA_ADDR","ARIMA_DATABASE_URL","ARIMA_OIDC_ISSUER","ARIMA_OIDC_AUDIENCE"]},
-                {name:"outbox-worker",entrypoint:"/outbox-worker",required_environment:["ARIMA_ENV","ARIMA_OUTBOX_HEALTH_ADDR","ARIMA_OUTBOX_DATABASE_URL","ARIMA_OUTBOX_WEBHOOK_URL","ARIMA_OUTBOX_WEBHOOK_TOKEN"]}
+                {
+                  name:"api",
+                  entrypoint:["/erp-api"],
+                  port:8080,
+                  environment:{ARIMA_ENV:"production",ARIMA_ADDR:":8080"},
+                  required_environment:["ARIMA_OIDC_ISSUER","ARIMA_OIDC_AUDIENCE","ARIMA_DATABASE_URL"]
+                },
+                {
+                  name:"outbox-worker",
+                  entrypoint:["/outbox-worker"],
+                  port:8081,
+                  environment:{ARIMA_ENV:"production",ARIMA_OUTBOX_HEALTH_ADDR:":8081"},
+                  required_environment:["ARIMA_OUTBOX_DATABASE_URL","ARIMA_OUTBOX_WEBHOOK_URL","ARIMA_OUTBOX_WEBHOOK_TOKEN"]
+                }
               ],
-              readiness:{api:"/health/ready",worker:"/health/ready",worker_port:8081,worker_visibility:"private"}
+              readiness:{all_services:true,timeout_seconds:300,private_worker_probe:"/health/ready"}
             }')"
-          # Do not follow redirects: never forward the bearer token to another host.
-          status="$(curl --fail --silent --show-error --max-time 30 --max-redirs 0 \
-            --output /dev/null --write-out '%{http_code}' \
-            --request POST \
-            --header "Authorization: Bearer ${STAGING_DEPLOY_TOKEN}" \
-            --header 'Content-Type: application/json' \
-            --data "$payload" \
-            "$STAGING_DEPLOY_HOOK_URL")"
-          if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error::Staging adapter did not return a successful HTTP status."
-            exit 1
-          fi
-          echo "Staging deployment adapter accepted the authenticated rollout request."
 
-      - name: Verify staging readiness
+          # Do not follow redirects: never forward the bearer token to another host.
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}'             --connect-timeout 10 --max-time 30 --max-redirs 0             --request POST             --header 'Content-Type: application/json'             --header "Authorization: Bearer ${STAGING_DEPLOY_TOKEN}"             --data "$payload"             "$STAGING_DEPLOY_HOOK_URL")"
+          case "$status" in
+            2??) echo "Staging adapter accepted the rollout request (HTTP $status)." ;;
+            *) echo "::error::Staging adapter rejected the rollout request (HTTP $status)."; exit 1 ;;
+          esac
+
+      - name: Verify the exact staging release and both services
         env:
           STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         shell: bash
         run: |
           set -euo pipefail
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error --max-time 5 "$STAGING_HEALTHCHECK_URL" -o /tmp/health.json; then
-              if jq -e '.api.status == "ready" and .worker.status == "ready"' /tmp/health.json >/dev/null; then
-                echo "Staging API and worker readiness report ready."
+            if curl --fail --silent --show-error --connect-timeout 5 --max-time 10               "$STAGING_HEALTHCHECK_URL" -o /tmp/arima-staging-health.json; then
+              if jq -e                 --arg digest "$IMAGE_DIGEST"                 --arg commit "$GITHUB_SHA"                 '.digest == $digest and .commit == $commit and .api.status == "ready" and .worker.status == "ready"'                 /tmp/arima-staging-health.json >/dev/null; then
+                echo "The requested image digest and commit are running; API and worker report ready."
                 exit 0
               fi
             fi
-            echo "Staging readiness probe ${attempt}/30 has not succeeded yet."
+            echo "Staging verification attempt ${attempt}/30 has not passed."
             sleep 10
           done
-          echo "::error::Staging did not report ready within 5 minutes. Inspect platform logs and roll back through the platform's documented controls."
+          echo "::error::Staging did not confirm the exact release and both services within five minutes."
+          echo "Use the provider's documented rollback procedure and inspect deployment logs."
           exit 1
 
-      - name: Deployment boundary
+      - name: State deployment boundary
         if: always()
-        run: echo "This workflow targets staging only. Production deployment is not implemented or triggered.";
+        run: echo "Staging only. This workflow does not run database migrations or deploy production."

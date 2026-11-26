@@ -80,8 +80,8 @@ The webhook receiver must durably accept events and deduplicate using the event 
 
 - Pull requests run Go/PostgreSQL integration checks, formatting, vet, vulnerability scanning, workflow lint and Linux binary builds. The container workflow separately validates AMD64 and ARM64 images without publishing them.
 - Pushes to `main` publish commit-tagged multi-architecture images to GHCR with SBOM and provenance attestations.
-- `staging-deploy.yml` is the single manual staging rollout workflow. It is gated to `main`, requires explicit dispatch acknowledgement, validates its adapter settings before publishing, deploys an immutable image digest, and verifies that the same commit/digest and both API and worker report ready.
-- The staging workflow is **not an operational deployment yet**. It requires a provider-specific adapter, a configured GitHub `staging` Environment, environment-scoped secrets/variables, registry pull access, and an aggregate health endpoint. Refer to [staging deployment](docs/staging-container-deployment.md).
+- `staging-deploy.yml` is the single manual staging workflow. Its default `preview` mode builds AMD64 and ARM64 without publishing or deploying and can run from a review branch. Its separate `deploy` mode is restricted to `main`, requires explicit acknowledgement, publishes an immutable image digest, requests the provider adapter rollout, and verifies the exact commit/digest plus API and worker readiness.
+- Staging deploy mode is **not operational yet**. It requires a selected provider, a provider-specific adapter with tested rollback, a protected GitHub `staging` Environment, environment-scoped secrets/variables, registry pull access, and an aggregate health endpoint. Refer to [staging deployment](docs/staging-container-deployment.md).
 - No production deployment or automatic production promotion is configured.
 
 ## Documentation

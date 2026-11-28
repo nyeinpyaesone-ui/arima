@@ -167,14 +167,14 @@ jobs:
               services:[
                 {
                   name:"api",
-                  entrypoint:["/erp-api"],
+                  command:["/erp-api"],
                   port:8080,
                   environment:{ARIMA_ENV:"production",ARIMA_ADDR:":8080"},
                   required_environment:["ARIMA_OIDC_ISSUER","ARIMA_OIDC_AUDIENCE","ARIMA_DATABASE_URL"]
                 },
                 {
                   name:"outbox-worker",
-                  entrypoint:["/outbox-worker"],
+                  command:["/outbox-worker"],
                   port:8081,
                   environment:{ARIMA_ENV:"production",ARIMA_OUTBOX_HEALTH_ADDR:":8081"},
                   required_environment:["ARIMA_OUTBOX_DATABASE_URL","ARIMA_OUTBOX_WEBHOOK_URL","ARIMA_OUTBOX_WEBHOOK_TOKEN"]

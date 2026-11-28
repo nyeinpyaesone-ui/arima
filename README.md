@@ -66,7 +66,7 @@ Provision roles, permissions and membership through the trusted operator process
 
 ## Outbox worker
 
-The same container image includes `/erp-api` and `/outbox-worker`. Start the worker as a separate process by overriding the image **entrypoint** to `/outbox-worker` (not merely its command). The optional local Compose overlay is `compose.worker.yaml`. For local use, add a real HTTPS receiver URL and token to ignored `.env`, then run `make dev-worker`. Never run it with sample placeholder values. It exposes internal liveness/readiness endpoints on port 8081; readiness checks the worker database connection only, not webhook delivery.
+The same container image includes `/erp-api` and `/outbox-worker`. The Dockerfile uses `CMD ["/erp-api"]` as its default process. Start the worker as a separate process by overriding the container **command** to `/outbox-worker`; do not pass it as an argument to the API executable. The optional local Compose overlay is `compose.worker.yaml` and uses `command: ["/outbox-worker"]`. For local use, add a real HTTPS receiver URL and token to ignored `.env`, then run `make dev-worker`. Never run it with sample placeholder values. It exposes internal liveness/readiness endpoints on port 8081; readiness checks the worker database connection only, not webhook delivery.
 
 Required worker environment:
 

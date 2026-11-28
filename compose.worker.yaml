@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    entrypoint: ["/outbox-worker"]
+    command: ["/outbox-worker"]
     depends_on:
       migrate:
         condition: service_completed_successfully

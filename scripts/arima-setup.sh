@@ -30,7 +30,8 @@ wait_health() {
 }
 verify() {
   preflight; env_file
-  bash -n scripts/env-preflight.sh scripts/arima-setup.sh
+  bash -n scripts/env-preflight.sh
+  bash -n scripts/arima-setup.sh
   sh -n scripts/migrate-local.sh
   compose config --quiet
   go mod download; go mod verify
@@ -90,7 +91,11 @@ usage() {
   echo "worker requires a real HTTPS receiver; no remote deploys are performed."
 }
 [ -f go.mod ] || fail "Run this script from the repository root."
-cmd="$1"
+if [ "$#" -gt 0 ]; then
+  cmd="$1"
+else
+  cmd=help
+fi
 case "$cmd" in
   preflight) preflight ;;
   verify) verify ;;

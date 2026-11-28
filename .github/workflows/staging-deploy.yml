@@ -25,12 +25,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy-staging:
-    name: Build staging preview or deploy reviewed image
-    if: >-
-      inputs.mode == 'preview' ||
-      (github.ref == 'refs/heads/main' &&
-       inputs.mode == 'deploy' && inputs.acknowledge == true)
+  preview:
+    name: Build non-publishing staging preview
+    if: inputs.mode == 'preview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build multi-architecture image without publishing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: arima-local:preview-${{ github.sha }}
+          platforms: linux/amd64,linux/arm64
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report preview boundary
+        run: |
+          echo "Staging preview build succeeded."
+          echo "Source commit: $GITHUB_SHA"
+          echo "No registry push, deployment request, migration, or production action was performed."
+
+  deploy:
+    name: Publish and request staging rollout
+    if: github.ref == 'refs/heads/main' && inputs.mode == 'deploy' && inputs.acknowledge == true
     runs-on: ubuntu-latest
     timeout-minutes: 35
     environment: staging
@@ -38,14 +71,13 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Checkout selected main commit
+      - name: Checkout reviewed main commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Validate staging adapter configuration
-        if: inputs.mode == 'deploy'
         env:
           STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
           STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
@@ -78,42 +110,29 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        if: inputs.mode == 'deploy'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build multi-architecture image
+      - name: Build and publish immutable image
         id: image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ inputs.mode == 'deploy' }}
+          push: true
           platforms: linux/amd64,linux/arm64
           tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          sbom: ${{ inputs.mode == 'deploy' }}
+          sbom: true
           provenance: mode=max
-
-      - name: Report non-publishing staging preview
-        if: inputs.mode == 'preview'
-        env:
-          IMAGE_REF: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Staging preview build succeeded."
-          echo "Source commit: $GITHUB_SHA"
-          echo "Image target (not published): $IMAGE_REF"
-          echo "Platforms: linux/amd64, linux/arm64"
-          echo "No registry push, deployment request, migration, or production action was performed."
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Validate published image digest
-        if: inputs.mode == 'deploy'
         env:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         shell: bash
@@ -124,22 +143,24 @@ jobs:
             *) echo "::error::Build did not return a valid sha256 image digest."; exit 1 ;;
           esac
 
-      - name: Request staging rollout of exact image digest
-        if: inputs.mode == 'deploy'
+      - name: Request staging rollout using immutable digest
         env:
           STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
           STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
-          IMAGE_REF: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          IMAGE_TAG: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         shell: bash
         run: |
           set -euo pipefail
+          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY}@${IMAGE_DIGEST}"
           payload="$(jq -cn \
             --arg image "$IMAGE_REF" \
+            --arg tag "$IMAGE_TAG" \
             --arg digest "$IMAGE_DIGEST" \
             --arg commit "$GITHUB_SHA" \
             '{
               image:$image,
+              image_tag:$tag,
               digest:$digest,
               commit:$commit,
               environment:"staging",
@@ -171,12 +192,11 @@ jobs:
             --data "$payload" \
             "$STAGING_DEPLOY_HOOK_URL")"
           case "$status" in
-            2??) echo "Staging adapter accepted the rollout request (HTTP $status)." ;;
+            2??) echo "Staging adapter accepted the immutable image rollout request (HTTP $status)." ;;
             *) echo "::error::Staging adapter rejected the rollout request (HTTP $status)."; exit 1 ;;
           esac
 
       - name: Verify exact staging release and both services
-        if: inputs.mode == 'deploy'
         env:
           STAGING_HEALTHCHECK_URL: ${{ vars.STAGING_HEALTHCHECK_URL }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
@@ -206,5 +226,5 @@ jobs:
         if: always()
         run: |
           echo "This workflow is staging-only."
-          echo "Preview mode does not publish or deploy."
-          echo "Deploy mode does not run database migrations or deploy production."
+          echo "Deploy mode requires main, explicit acknowledgement, and the protected staging Environment."
+          echo "No production promotion or database migration is performed."

@@ -14,4 +14,4 @@ COPY --from=build /out/erp-api /erp-api
 COPY --from=build /out/outbox-worker /outbox-worker
 EXPOSE 8080 8081
 USER nonroot:nonroot
-ENTRYPOINT ["/erp-api"]
+CMD ["/erp-api"]

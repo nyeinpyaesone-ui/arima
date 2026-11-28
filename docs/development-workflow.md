@@ -56,7 +56,7 @@ Require reviewers and restrict deployment branches for protected environments be
 - Runtime API and worker identities must be `NOSUPERUSER NOBYPASSRLS`. Keep their database grants separate and verify actual catalog privileges in staging.
 - Production PostgreSQL connections must use TLS certificate and hostname verification (`sslmode=verify-full`).
 - The staging workflow requires an authenticated provider adapter and a protected GitHub Environment. It sends an immutable image digest and the required environment-variable names, not secret values.
-- The adapter must launch API and worker with separate entrypoints, resolve runtime values from the provider secret manager, and verify both readiness endpoints from inside the provider network. Keep worker port 8081 private.
+- The adapter must launch API and worker with separate container commands (`/erp-api` and `/outbox-worker`), resolve runtime values from the provider secret manager, and verify both readiness endpoints from inside the provider network. For Render, use a Private Service for the worker because the adapter needs private HTTP access to port 8081; a Render Background Worker has no inbound private hostname. Keep worker port 8081 private.
 - The staging workflow does not run migrations or promote to production.
 - Use private database networking where possible, firewall allow-lists, connection limits, backups and tested restore procedures.
 - Do not automatically apply destructive down migrations. Back up and obtain explicit approval before any rollback that deletes tenant/audit/outbox data.

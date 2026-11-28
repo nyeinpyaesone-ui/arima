@@ -55,7 +55,7 @@ Configure both OIDC variables or neither outside production. Production startup 
 | `ARIMA_OUTBOX_WEBHOOK_TOKEN` | yes | Bearer credential for the receiver; store in a secret manager |
 | `ARIMA_OUTBOX_HEALTH_ADDR` | no | Health listener; default `:8081` |
 
-The worker process is `/outbox-worker`; the API process is `/erp-api`. The worker must be launched by overriding the image entrypoint, not by adding `/outbox-worker` as an argument to the API entrypoint. They use separate database credentials and process health endpoints. The webhook must authenticate the bearer token, durably accept the event, deduplicate using `Idempotency-Key` and `X-ARIMA-Event-ID`, and return 2xx only after durable acceptance. Delivery is at-least-once. HTTP 429/5xx responses are retried; permanent rejections are dead-lettered. Never log tokens or full customer/event payloads.
+The worker process is `/outbox-worker`; the API process is `/erp-api`. The image default is `CMD ["/erp-api"]`; launch the worker by overriding the container command to `/outbox-worker`, not by passing it as an argument to `/erp-api`. Docker Compose uses `command: ["/outbox-worker"]` for the worker profile. They use separate database credentials and process health endpoints. The webhook must authenticate the bearer token, durably accept the event, deduplicate using `Idempotency-Key` and `X-ARIMA-Event-ID`, and return 2xx only after durable acceptance. Delivery is at-least-once. HTTP 429/5xx responses are retried; permanent rejections are dead-lettered. Never log tokens or full customer/event payloads.
 
 ## OIDC and authorization
 

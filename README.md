@@ -28,7 +28,6 @@ Compose starts PostgreSQL, applies migrations 0001–0003 once using a migration
 
 For local Go checks, run `go mod download`, `go mod verify`, `make check`, and `go run ./cmd/erp-api`. Without a configured OIDC provider, customer routes remain inaccessible (fail closed). Provision a real development tenant membership for the exact OIDC subject before testing customer access.
 
-
 ## API routes
 
 | Method | Path | Required permission | Purpose |
@@ -67,7 +66,7 @@ Provision roles, permissions and membership through the trusted operator process
 
 ## Outbox worker
 
-The same container image includes `/erp-api` and `/outbox-worker`. Start the worker as a separate process by overriding the image **entrypoint** to `/outbox-worker` (not merely its command). The optional local Compose overlay is `compose.worker.yaml`. For local use, add a real HTTPS receiver URL and token to ignored `.env`, then run `make dev-worker`. Never run it with sample placeholder values. It exposes internal liveness/readiness endpoints on port 8081; readiness checks the worker database connection only, not webhook delivery.
+The same container image includes `/erp-api` and `/outbox-worker`. The Dockerfile uses `CMD ["/erp-api"]` as its default process. Start the worker as a separate process by overriding the container **command** to `/outbox-worker`; do not pass it as an argument to the API executable. The optional local Compose overlay is `compose.worker.yaml` and uses `command: ["/outbox-worker"]`. For local use, add a real HTTPS receiver URL and token to ignored `.env`, then run `make dev-worker`. Never run it with sample placeholder values. It exposes internal liveness/readiness endpoints on port 8081; readiness checks the worker database connection only, not webhook delivery.
 
 Required worker environment:
 
@@ -77,9 +76,13 @@ Required worker environment:
 
 The webhook receiver must durably accept events and deduplicate using the event ID supplied in Idempotency-Key and X-ARIMA-Event-ID. Delivery is at-least-once, not exactly-once. 2xx means durable acceptance; 429/5xx are retried, other non-2xx responses are dead-lettered. Do not log tokens or full event payloads.
 
-## CI and release boundary
+## CI, image publishing and deployment boundary
 
-PR CI runs workflow lint, module integrity/tidy checks, formatting, vet, vulnerability scanning, race-enabled PostgreSQL integration tests and a Linux binary build. Container validation builds both Linux AMD64 and ARM64 images without publishing on pull requests. GHCR publishing is limited to pushes on main. Staging deployment is manually dispatched from main and requires a protected staging environment and a reviewed provider adapter. No production deployment is configured by this baseline.
+- Pull requests run Go/PostgreSQL integration checks, formatting, vet, vulnerability scanning, workflow lint and Linux binary builds. The container workflow separately validates AMD64 and ARM64 images without publishing them.
+- Pushes to `main` publish commit-tagged multi-architecture images to GHCR with SBOM and provenance attestations.
+- `staging-deploy.yml` is the single manual staging workflow. Its default `preview` mode builds AMD64 and ARM64 without publishing or deploying and can run from a review branch. Its separate `deploy` mode is restricted to `main`, requires explicit acknowledgement, publishes an immutable image digest, requests the provider adapter rollout, and verifies the exact commit/digest plus API and worker readiness.
+- Staging deploy mode is **not operational yet**. It requires a selected provider, a provider-specific adapter with tested rollback, a protected GitHub `staging` Environment, environment-scoped secrets/variables, registry pull access, and an aggregate health endpoint. Refer to [staging deployment](docs/staging-container-deployment.md).
+- No production deployment or automatic production promotion is configured.
 
 ## Documentation
 
@@ -88,6 +91,7 @@ PR CI runs workflow lint, module integrity/tidy checks, formatting, vet, vulnera
 - [Database migrations](migrations/README.md)
 - [Tenant access provisioning](docs/runbooks/tenant-access-provisioning.md)
 - [Staging deployment](docs/runbooks/staging-deployment.md)
+- [Staging container deployment contract](docs/staging-container-deployment.md)
 - [OpenAPI contract](api/openapi/openapi.yaml)
 
 ## Layout

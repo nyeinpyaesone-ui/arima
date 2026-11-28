@@ -50,6 +50,7 @@ jobs:
         run: |
           sh -n scripts/migrate-local.sh
           bash -n scripts/env-preflight.sh
+          bash -n scripts/arima-setup.sh
           docker compose --env-file configs/arima.env.example config --quiet
           docker compose --env-file configs/arima.env.example --env-file configs/arima.worker.env.example -f compose.yaml -f compose.worker.yaml config --quiet
       - name: Smoke-test local Compose API and worker

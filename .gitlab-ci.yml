@@ -1,0 +1,108 @@
+spec:
+  inputs:
+    arima_source_sha:
+      type: string
+      default: "0000000000000000000000000000000000000000"
+      regex: '^[0-9a-f]{40}$'
+      description: "Exact canonical commit SHA from nyeinpyaesone-ui/arima."
+---
+workflow:
+  name: "ARIMA canonical $[[ inputs.arima_source_sha ]]"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "trigger" || $CI_PIPELINE_SOURCE == "api"'
+    - when: never
+
+stages:
+  - verify
+  - test
+
+variables:
+  GIT_DEPTH: "1"
+  GOTOOLCHAIN: "local"
+  NPM_CONFIG_AUDIT: "false"
+  NPM_CONFIG_FUND: "false"
+  ARIMA_SOURCE_SHA: "$[[ inputs.arima_source_sha ]]"
+
+.canonical_checkout:
+  before_script:
+    - |
+      set -eu
+      test "$ARIMA_SOURCE_SHA" != "0000000000000000000000000000000000000000"
+      printf '%s\n' "$ARIMA_SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$'
+      git init .canonical-source
+      git -C .canonical-source remote add origin https://github.com/nyeinpyaesone-ui/arima.git
+      git -C .canonical-source fetch --no-tags --depth=1 origin "$ARIMA_SOURCE_SHA"
+      git -C .canonical-source checkout --detach FETCH_HEAD
+      actual_sha="$(git -C .canonical-source rev-parse HEAD)"
+      test "$actual_sha" = "$ARIMA_SOURCE_SHA"
+      echo "Validated canonical GitHub source SHA: $actual_sha"
+
+go-verify:
+  extends: .canonical_checkout
+  stage: verify
+  image: golang:1.26.11
+  script:
+    - cd .canonical-source
+    - go mod download
+    - go mod verify
+    - go mod tidy
+    - git diff --exit-code -- go.mod go.sum
+    - test -z "$(gofmt -l ./cmd ./internal)"
+    - go vet ./...
+    - go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
+go-test:
+  extends: .canonical_checkout
+  stage: test
+  image: golang:1.26.11
+  services:
+    - name: postgres:15
+      alias: postgres
+  variables:
+    POSTGRES_USER: "postgres"
+    POSTGRES_PASSWORD: "postgres"
+    POSTGRES_DB: "arima_test"
+    ARIMA_TEST_DATABASE_URL: "postgres://postgres:postgres@postgres:5432/arima_test?sslmode=disable"
+    ARIMA_TEST_RUNTIME_DATABASE_URL: "postgres://arima_runtime:arima_test_password@postgres:5432/arima_test?sslmode=disable"
+    ARIMA_CUSTOMER_TEST_DATABASE_URL: "postgres://postgres:postgres@postgres:5432/arima_customer_test?sslmode=disable"
+    ARIMA_CUSTOMER_TEST_RUNTIME_DATABASE_URL: "postgres://arima_customer_runtime:arima_customer_test_password@postgres:5432/arima_customer_test?sslmode=disable"
+    ARIMA_CUSTOMER_TEST_WORKER_DATABASE_URL: "postgres://arima_outbox_runtime:arima_outbox_test_password@postgres:5432/arima_customer_test?sslmode=disable"
+    ARIMA_OUTBOX_TEST_DATABASE_URL: "postgres://postgres:postgres@postgres:5432/arima_outbox_test?sslmode=disable"
+    ARIMA_OUTBOX_TEST_RUNTIME_DATABASE_URL: "postgres://arima_outbox_runtime:arima_outbox_test_password@postgres:5432/arima_outbox_test?sslmode=disable"
+  script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends postgresql-client
+    - rm -rf /var/lib/apt/lists/*
+    - cd .canonical-source
+    - |
+      for attempt in $(seq 1 30); do
+        if pg_isready -h postgres -p 5432 -U postgres -d arima_test; then
+          break
+        fi
+        sleep 2
+      done
+      pg_isready -h postgres -p 5432 -U postgres -d arima_test
+    - PGPASSWORD=postgres psql "$ARIMA_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE arima_customer_test"
+    - |
+      PGPASSWORD=postgres psql "$ARIMA_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+      CREATE DATABASE arima_outbox_test;
+      CREATE ROLE arima_outbox_runtime LOGIN PASSWORD 'arima_outbox_test_password'
+        NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+      GRANT CONNECT ON DATABASE arima_outbox_test TO arima_outbox_runtime;
+      SQL
+    - go test -race ./...
+
+web-verify:
+  extends: .canonical_checkout
+  stage: verify
+  image: node:22-bookworm-slim
+  script:
+    - cd .canonical-source/web
+    - npm ci --no-audit --no-fund
+    - npm run typecheck
+    - npm run build
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - .canonical-source/web/dist/

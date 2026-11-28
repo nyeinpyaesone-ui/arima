@@ -78,11 +78,16 @@ worker() {
   echo "Worker readiness checks database connectivity, not webhook delivery."
 }
 status() {
-  env_file; compose ps --all
+  env_file
+  compose ps --all
   cfg="$(compose config --format json)"
   port="$(printf '%s' "$cfg" | jq -r '.services.api.ports[]? | select(.target == 8080) | .published // empty' | head -n 1)"
   [ -n "$port" ] || port=8080
-  curl -fsS "http://127.0.0.1:$port/health/ready" || true
+  body="$(curl -fsS --connect-timeout 2 --max-time 5 "http://127.0.0.1:$port/health/ready")" ||
+    fail "API readiness endpoint is unreachable at 127.0.0.1:$port."
+  printf '%s\n' "$body" | jq -e '.status == "ready"' >/dev/null ||
+    fail "API is reachable but is not ready."
+  echo "API readiness: ready"
 }
 down() { env_file; compose down --remove-orphans; }
 usage() {

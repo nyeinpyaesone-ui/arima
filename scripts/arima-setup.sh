@@ -11,7 +11,7 @@ env_file() {
   git check-ignore -q .env || fail ".env must be Git-ignored."
 }
 preflight() {
-  for c in git go node npm docker curl jq; do need "$c"; done
+  for c in git go node npm docker curl jq cc; do need "$c"; done
   [ "$(go env GOVERSION)" = "go1.26.11" ] || fail "Use Go 1.26.11 to match go.mod and CI."
   [ "$(node -p 'Number(process.versions.node.split(".")[0])')" -ge 22 ] || fail "Node.js 22+ required."
   docker compose version >/dev/null || fail "Docker Compose v2 required."
@@ -84,7 +84,7 @@ status() {
   [ -n "$port" ] || port=8080
   curl -fsS "http://127.0.0.1:$port/health/ready" || true
 }
-down() { env_file; worker_compose down --remove-orphans; }
+down() { env_file; compose down --remove-orphans; }
 usage() {
   echo "Commands: preflight | verify | up | worker | status | down | all"
   echo "all = verify then up. down preserves the PostgreSQL volume."

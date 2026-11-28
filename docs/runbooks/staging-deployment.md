@@ -67,6 +67,20 @@ The API role should receive only SELECT/INSERT/UPDATE on `tenant_records` and `i
 
 The worker role should receive only SELECT on `tenants` and SELECT/UPDATE on `outbox_events`. It must not read business records or membership tables. Verify effective privileges and forced RLS against the actual staging database.
 
+## Render service-type mapping
+
+For the current Render adapter design, deploy the API as a **Web Service** and the outbox process as a **Private Service** in the same Render workspace and region as the adapter:
+
+- API: public HTTPS ingress only on the configured API port; set `PORT` and `ARIMA_ADDR` to the same port (the current adapter contract uses 8080), and configure `healthCheckPath: /health/ready`.
+- Outbox process: `pserv` / Private Service, command `/outbox-worker`, `ARIMA_OUTBOX_HEALTH_ADDR=:8081`, internal listener on 8081, no public ingress.
+- Adapter: HTTPS Web Service with a public authenticated deploy endpoint and private-network access to the outbox service's internal hostname and port 8081.
+
+Do **not** configure the outbox process as a Render Background Worker while the adapter contract requires an HTTP probe. Render Background Workers have no inbound public or private hostname; a listening health server inside that process cannot be reached by the adapter. If a Background Worker is preferred instead, implement a durable worker heartbeat/readiness record in PostgreSQL and change the adapter to verify that record; that alternative is not implemented by this repository.
+
+Render Private Services use TCP health checks at the platform layer. The adapter must perform the HTTP `GET /health/ready` check over the private network. Never expose port 8081 publicly to make the probe work.
+
+The container image now uses `CMD ["/erp-api"]` as its default process. Render's Docker command override selects `/outbox-worker` for the private service. Do not use an ENTRYPOINT override field for this contract.
+
 ## Webhook receiver contract
 
 The receiver must authenticate the bearer token, accept only expected event types, durably accept each event before returning 2xx, and deduplicate by event ID using `Idempotency-Key` and `X-ARIMA-Event-ID`. Delivery is at-least-once, not exactly-once. HTTP 429/5xx are retried; permanent rejection is dead-lettered. Configure delivery metrics and alerts for pending age, retries, expired leases and dead-letter volume.

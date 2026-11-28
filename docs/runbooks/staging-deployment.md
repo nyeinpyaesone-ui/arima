@@ -44,7 +44,7 @@ The adapter must:
 2. Allow-list repository and image namespace `ghcr.io/nyeinpyaesone-ui/arima`.
 3. Accept the `image`, immutable `digest`, `commit`, `environment`, `services` and `readiness` fields from the workflow.
 4. Reject any environment other than `staging`; deploy both processes from the exact supplied digest.
-5. Launch the API with entrypoint `/erp-api` and the worker with entrypoint `/outbox-worker`. This is an entrypoint override, not a command argument; the image's default entrypoint is `/erp-api`.
+5. Launch the API with command `/erp-api` and the worker with command `/outbox-worker`. This is an command override, not a command argument; the image's default command is `/erp-api`.
 6. Resolve each service's `required_environment` names from the provider secret manager. Never expect actual secret values in the deployment payload.
 7. Verify both API and worker `/health/ready` endpoints from inside the provider network. Worker readiness must remain private; do not expose port 8081 publicly just so a GitHub-hosted runner can probe it.
 8. Return 2xx only after the provider accepts the exact digest and both process readiness checks pass. Preserve the previous known-good revision and provide a tested rollback.
